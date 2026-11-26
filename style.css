@@ -394,6 +394,14 @@ figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; }
 }
 .fig-hint { display: none; }
 @media (width < 36rem) { .fig-hint { display: inline; } }
+/* 실제 Unity 화면 캡처: 원래 크기보다 키우지 않고, 좁으면 줄인 뒤 눌러서 원본을 본다 */
+figure.shot { margin: 1rem 0 0.4rem; }
+.shot a { display: inline-block; max-inline-size: 100%; border-radius: 6px; }
+.shot a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shot img {
+  display: block; max-inline-size: 100%; block-size: auto;
+  border: 1px solid var(--line); border-radius: 6px; background: #383838;
+}
 .svg-text { fill: var(--text); font-family: inherit; }
 .svg-muted { fill: var(--muted); font-family: inherit; }
 .svg-accent { fill: var(--accent); font-family: inherit; }

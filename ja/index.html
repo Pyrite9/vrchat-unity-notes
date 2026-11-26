@@ -159,6 +159,10 @@
           <dt class="bad">しないと</dt><dd>前髪が深度を書く半透明（2450）で目のシェーダーが 3000 だと、目を描く番には前髪がもう深度を埋めた状態です。そのため前髪越しに透けるはずの目がまるごと抜けます。顔に描かれた素の目は 2000 なので問題がなく、目を替えてから初めて表に出ました。</dd>
           <dt class="do">こうする</dt><dd>目を前髪のすぐ前の番号（2449）に移します。キューを動かすと、間にあったものとの順番も変わります。ここでは 2460 にあった頬染め・涙エフェクトが目の上に乗るようになったので、周りのエフェクトまで確認し直しました。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/l1.png"><img src="../img/l1.png" width="806" height="456" alt="Salt アバターのヒエラルキーと、3 つのマテリアルの Render Queue 欄" loading="lazy" decoding="async"></a>
+          <figcaption>Pyrite プロジェクトの Salt アバターです。① 目(Lume Optic)2449 ② 前髪 2450、ZWrite オン ③ 顔エフェクト(頬染め・涙)2460。目が前髪より一つ先に描かれます。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="l2">
@@ -201,6 +205,10 @@
           <dt class="bad">しないと</dt><dd>キューが <code>From Shader</code> になっていると（<code>.mat</code> では <code>m_CustomRenderQueue: -1</code>）、シェーダーを替えた瞬間にキューも一緒に変わります。せっかく合わせた順番が、シェーダー変換ツールを一度回しただけで崩れることがあります。</dd>
           <dt class="do">こうする</dt><dd>順番が大事なマテリアルはキューを数値で固定します。シェーダーを替えたり一括変換したりした後は、ビルド結果からキューを読み直します。同じ番号に複数をまとめるより、2451、2452 のように分けて順番をはっきりさせるほうが安全です。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/l5.png"><img src="../img/l5.png" width="484" height="150" alt="From Shader のマテリアルと、数値で固定したマテリアルの Render Queue 欄" loading="lazy" decoding="async"></a>
+          <figcaption>① 顔エフェクトのマテリアルは From Shader なので、シェーダーが決める 2460 に従います。② 前髪は 2450 に固定しています。このシェーダーの既定値も 2460 なので、From Shader に戻ると目との順序が崩れます。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="l6">
@@ -261,6 +269,10 @@
           <dt class="bad">しないと</dt><dd>結合したメッシュやほかの素体から移したメッシュは、元の小さい箱をそのまま引き継ぎます。立ち姿勢で部位にぴったり合わせた箱なので、かがんだり座ったりすると前髪や靴が箱の外に出て、見る角度によってはまるごと消えます。結合ツールで bounds を 0 のまま空けておくと元の箱を合わせた大きさが使われるので、結果は同じです。</dd>
           <dt class="do">こうする</dt><dd>Root Bone を <code>Hips</code> にして、体全体を覆う箱を入れます。たとえば center 0、extents <code>0.5 / 0.8 / 0.3</code> m や 2 m の立方体くらいで十分です。体に付くレンダラー（体、髪、服、アクセサリー）はすべて同じ箱にそろえておくとよいです。箱が同じなら AAO の自動結合もまとめやすくなります。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b1.png"><img src="../img/b1.png" width="806" height="550" alt="AccessoryMerge オブジェクトの Skinned Mesh Renderer インスペクター" loading="lazy" decoding="async"></a>
+          <figcaption>AAO で結合する AccessoryMerge オブジェクトです(Avatar_Overalls)。① Root Bone = Hips ② center 0、extents 0.5 / 0.8 / 0.3 ③ Update When Offscreen はオフのまま。Mesh が None なのは、結合メッシュがビルド時に作られるためです。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b2">
@@ -270,6 +282,10 @@
           <dt class="bad">しないと</dt><dd>完全に平らなメッシュは箱の厚みが 0 になります。基準点を中心に回るメッシュ（ビルボードなど）は、回った頂点が箱の外に出て切れることがあります。<span class="badge est">推定</span></dd>
           <dt class="do">こうする</dt><dd>厚みは 1 cm ほど付けておくのが安全です。回るメッシュはあらかじめ回転半径の分（例: ±0.25 m）広げておきます。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b2.png"><img src="../img/b2.png" width="792" height="196" alt="平らなスパークメッシュの Bounds 欄" loading="lazy" decoding="async"></a>
+          <figcaption>平らなスパークのメッシュ(PyriteSpinner)です。① 厚み方向の Z の extent を 0 ではなく 0.005(厚さ 1 cm)にしています。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b3">
@@ -279,6 +295,10 @@
           <dt class="bad">しないと</dt><dd>レーザーやスキャンのように数十 m 伸びるエフェクトが、アバター全体の Bounds を 1.0 × 1.65 × 0.6 m から 66.8 × 59.8 × 30 m に広げ、そのアバターは Very Poor になりました（一緒に入れた Light 2 つも原因です）。ふだんオフにしているオブジェクトも統計には入ります。</dd>
           <dt class="do">こうする</dt><dd>体に付くものは体の大きさの箱にそろえ、長いエフェクトだけを必要な大きさにします。ランクが問題になるなら、そのエフェクトを切れるオプションを用意します。箱が小さければ消え、大きければランクが下がるので、どちらを受け入れるかを選ぶ問題です。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b3.png"><img src="../img/b3.png" width="792" height="568" alt="Pulse Watch インスペクターの機能選択欄" loading="lazy" decoding="async"></a>
+          <figcaption>レーザーとスキャンを持つ腕時計ギミック(Pulse Watch)です。① スキャンの波と深度ライト ② ウェイポイントのレーザー。遠くまで届く効果でビルドすると箱が大きくなるので、機能ごとに外してビルドできるようにしました。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b4">
@@ -321,6 +341,10 @@
             <p>衣装では、比べてみたら <code>_Cull</code> とシェーダーの種類だけが違っていたこともあります。比べれば直す場所はすぐに絞れます。</p>
           </dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c1.png"><img src="../img/c1.png" width="942" height="194" alt="前髪と後ろ髪のマテリアルの lilToon 設定を並べたところ" loading="lazy" decoding="async"></a>
+          <figcaption>左が前髪、右が後ろ髪のマテリアルです。① 明るさの上限(_LightMaxLimit)を両方 1 に(後ろ髪は元 0.9)② マットキャップを両方オフ(後ろ髪は元オン)③ 輪郭線の幅はメッシュに合わせて別々 ④ 後ろ髪のテクスチャは彩度 0、明度 1.534 で下地の明るさを合わせる ⑤ 同じ _Color。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="c2">
@@ -357,6 +381,10 @@
           <dt class="bad">しないと</dt><dd>エディターではまったく同じなのに、ライトプローブを焼いたワールドや点光源のあるワールドでだけ、前髪と後ろ髪の色と明るさが分かれました。Anchor のないレンダラーは自分の箱の中心でプローブを読み、点光源を Pixel と Vertex に振り分ける判断もレンダラーごとに別々に行うためと見ています。<span class="badge est">推定</span> 原因そのものは再現できませんでしたが、下のようにそろえた後、インゲームで差がなくなりました。</dd>
           <dt class="do">こうする</dt><dd>Modular Avatar の <code>MA Mesh Settings</code> で、体、髪、服のレンダラーを Probe Anchor は Chest、Bounds Root は Hips、箱は同じ大きさにそろえます。販売されている prefab ごとにこの値がまちまちなので、アセットを混ぜるたびに確認が必要です。</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c2.png"><img src="../img/c2.png" width="806" height="488" alt="前髪レンダラーと後ろ髪の MA Mesh Settings インスペクター" loading="lazy" decoding="async"></a>
+          <figcaption>Salt アバターです。上が前髪のレンダラー、下が後ろ髪(Lavender_Back)に付けた MA Mesh Settings です。① Probe Anchor(インスペクター上の名前は Anchor Override)= Chest ② Root Bone = Hips ③ 同じ箱(extents 1 / 1 / 1)。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <section id="c3" aria-labelledby="c3-h">
@@ -401,6 +429,10 @@
             </ol>
           </dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c5.png"><img src="../img/c5.png" width="986" height="488" alt="Light Limit Changer コンポーネントのライティング設定" loading="lazy" decoding="async"></a>
+          <figcaption>Light Limit Changer の設定です。① 明るさの下限・上限はレンダラー単位でアニメーションをかけるので、同じレンダラーのマテリアルすべてにかかります。② 結果の色を変えていた Unlit 機能はツール側でオフにしました。<span class="fig-hint"> タップすると原寸で見られます。</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="c6">

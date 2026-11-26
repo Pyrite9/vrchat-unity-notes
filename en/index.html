@@ -159,6 +159,10 @@
           <dt class="bad">If you don't</dt><dd>If the bangs are a transparent material that writes depth (2450) and the eye shader is at 3000, the bangs have already filled in depth by the time the eyes are drawn. The eyes that should show through the bangs drop out entirely. The stock eyes painted on the face were at 2000 and looked fine, so the problem only surfaced after the eyes were replaced.</dd>
           <dt class="do">Do this</dt><dd>Move the eyes to the number just before the bangs (2449). Moving a queue also changes its order relative to whatever sat in between. Here, the blush and tear effects at 2460 ended up on top of the eyes, so I rechecked the surrounding effects as well.</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/l1.png"><img src="../img/l1.png" width="806" height="456" alt="Hierarchy of the Salt avatar and the Render Queue fields of three materials" loading="lazy" decoding="async"></a>
+          <figcaption>The Salt avatar in the Pyrite project. ① Eyes (Lume Optic) 2449 ② Bangs 2450, ZWrite on ③ Face effects (blush, tears) 2460. The eyes are drawn one step before the bangs.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="l2">
@@ -201,6 +205,10 @@
           <dt class="bad">If you don't</dt><dd>If the queue is set to <code>From Shader</code> (<code>m_CustomRenderQueue: -1</code> in the <code>.mat</code>), it changes the moment you swap the shader. An order you worked to set up can break from a single run of a shader conversion tool.</dd>
           <dt class="do">Do this</dt><dd>Pin the queue to a number on any material whose order matters. After swapping or batch-converting shaders, read the queues back from the build output. Spreading materials out as 2451, 2452 and so on makes the order clearer and safer than stacking several on one number.</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/l5.png"><img src="../img/l5.png" width="484" height="150" alt="Render Queue fields of a material left on From Shader and one fixed to a number" loading="lazy" decoding="async"></a>
+          <figcaption>① The face-effect material is on From Shader, so it follows the shader's 2460. ② The bangs are fixed at 2450. This shader also defaults to 2460, so going back to From Shader would break the order with the eyes.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="l6">
@@ -261,6 +269,10 @@
           <dt class="bad">If you don't</dt><dd>A merged mesh, or one moved over from another base body, inherits its original small box. That box was fitted tightly to the part in a standing pose, so crouching or sitting pushes the bangs or shoes out of it, and depending on the viewing angle they disappear entirely. Leaving bounds at 0 in a merge tool makes it use the combined size of the original boxes, with the same result.</dd>
           <dt class="do">Do this</dt><dd>Set the Root Bone to <code>Hips</code> and give it a box that covers the whole body, for example center 0 with extents <code>0.5 / 0.8 / 0.3</code> m, or a 2 m cube. It helps to give every renderer attached to the body (body, hair, clothes, accessories) the same box. Matching boxes also let AAO's automatic merging combine them more readily.</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b1.png"><img src="../img/b1.png" width="806" height="550" alt="Skinned Mesh Renderer inspector of the AccessoryMerge object" loading="lazy" decoding="async"></a>
+          <figcaption>The AccessoryMerge object that AAO merges (Avatar_Overalls). ① Root Bone = Hips ② center 0, extents 0.5 / 0.8 / 0.3 ③ Update When Offscreen stays off. Mesh shows None because the merged mesh is created at build time.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b2">
@@ -270,6 +282,10 @@
           <dt class="bad">If you don't</dt><dd>A perfectly flat mesh gets a box with zero thickness. A mesh that rotates around a pivot (a billboard, for example) can have rotated vertices leave the box and get cut off. <span class="badge est">Inferred</span></dd>
           <dt class="do">Do this</dt><dd>About 1 cm of thickness is a safe choice. For spinning meshes, widen the box ahead of time by the rotation radius (for example ±0.25 m).</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b2.png"><img src="../img/b2.png" width="792" height="196" alt="Bounds fields of a flat spark mesh" loading="lazy" decoding="async"></a>
+          <figcaption>A flat spark mesh (PyriteSpinner). ① The Z extent, the thickness axis, is 0.005 (1 cm thick) instead of 0.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b3">
@@ -279,6 +295,10 @@
           <dt class="bad">If you don't</dt><dd>An effect reaching tens of meters, like a laser or scan, grew the whole avatar's Bounds from 1.0 × 1.65 × 0.6 m to 66.8 × 59.8 × 30 m, and the avatar became Very Poor (the two Lights added with it also contributed). Objects that are normally turned off still count in the stats.</dd>
           <dt class="do">Do this</dt><dd>Keep everything attached to the body on a body-sized box, and give only the long effects the size they need. If the rank becomes a problem, add an option that turns the effect off. A small box makes things disappear and a big box lowers the rank, so it comes down to choosing which one you accept.</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/b3.png"><img src="../img/b3.png" width="792" height="568" alt="The Include section of the Pulse Watch inspector" loading="lazy" decoding="async"></a>
+          <figcaption>A wristwatch gimmick with a scan and a laser (Pulse Watch). ① Scan wave and depth light ② Waypoint laser. They reach far and grow the box when built, so each one can be left out of the build.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="b4">
@@ -321,6 +341,10 @@
             <p>With clothing, a comparison once showed that only <code>_Cull</code> and the shader type differed. Comparing narrows down what to fix very quickly.</p>
           </dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c1.png"><img src="../img/c1.png" width="942" height="194" alt="lilToon settings of the front and back hair materials side by side" loading="lazy" decoding="async"></a>
+          <figcaption>Front hair on the left, back hair on the right. ① Upper brightness limit (_LightMaxLimit) 1 on both (the back hair was 0.9) ② MatCap off on both (the back hair had it on) ③ Outline width set per mesh ④ The back hair texture gets saturation 0 and value 1.534 to match the base brightness ⑤ The same _Color.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="c2">
@@ -357,6 +381,10 @@
           <dt class="bad">If you don't</dt><dd>Identical in the editor, the bangs and back hair split in color and brightness only in worlds with baked light probes or point lights. My reading is that a renderer without an Anchor samples probes at its own box center, and that each renderer separately decides which point lights are Pixel and which are Vertex. <span class="badge est">Inferred</span> I could not reproduce the cause itself, but after matching them as below, the difference disappeared in game.</dd>
           <dt class="do">Do this</dt><dd>Use Modular Avatar's <code>MA Mesh Settings</code> to give the body, hair and clothing renderers Probe Anchor = Chest, Bounds Root = Hips, and a box of the same size. Commercial prefabs all set these differently, so check every time you mix assets.</dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c2.png"><img src="../img/c2.png" width="806" height="488" alt="Inspector of the bangs renderer and the MA Mesh Settings on the back hair" loading="lazy" decoding="async"></a>
+          <figcaption>The Salt avatar. Top: the bangs renderer. Bottom: MA Mesh Settings on the back hair (Lavender_Back). ① Probe anchor (labeled Anchor Override in the inspector) = Chest ② Root Bone = Hips ③ The same box (extents 1 / 1 / 1).<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <section id="c3" aria-labelledby="c3-h">
@@ -401,6 +429,10 @@
             </ol>
           </dd>
         </dl>
+        <figure class="shot">
+          <a href="../img/c5.png"><img src="../img/c5.png" width="986" height="488" alt="Lighting settings of the Light Limit Changer component" loading="lazy" decoding="async"></a>
+          <figcaption>Light Limit Changer settings. ① The brightness limits are animated per renderer, so they apply to every material on that renderer. ② The Unlit feature, which was changing the result color, is turned off in the tool.<span class="fig-hint"> Tap to view at full size.</span></figcaption>
+        </figure>
       </article>
 
       <article class="case" id="c6">
