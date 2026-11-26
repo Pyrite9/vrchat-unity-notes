@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Unity 現場ノート — VRChat アバター制作の方法論</title>
+<meta name="description" content="VRChat アバターを Unity で作るときに守っているルール。Render Queue、bounds、色のズレ、慣れた人でもハマる落とし穴を「やらないとどうなるか」と「どうするか」でまとめました。">
+<link rel="alternate" hreflang="ko" href="../">
+<link rel="alternate" hreflang="ja" href="./">
+<link rel="alternate" hreflang="en" href="../en/">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">本文へスキップ</a>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M11 1 21 7v8l-10 6L1 15V7z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 1v20M1 7l10 6 10-6" fill="none" stroke="currentColor" stroke-width="1" opacity=".55"/></svg>
+      Unity 現場ノート
+    </a>
+    <nav aria-label="言語">
+      <ul class="lang-switch">
+        <li><a href="../" hreflang="ko" lang="ko">한국어</a></li>
+        <li><a href="./" hreflang="ja" lang="ja" aria-current="page">日本語</a></li>
+        <li><a href="../en/" hreflang="en" lang="en">English</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">目次</h2>
+    <ol start="0">
+      <li><a href="#about">読み方</a></li>
+      <li><a href="#layers">レンダリングレイヤー (Render Queue)</a>
+        <ol>
+          <li><a href="#l1">透けて見えるものを先に</a></li>
+          <li><a href="#l2">深度マスクの位置</a></li>
+          <li><a href="#l3">半透明同士の重なり</a></li>
+          <li><a href="#l4">ステンシルの順序と番号</a></li>
+          <li><a href="#l5">シェーダー変更後のキュー</a></li>
+          <li><a href="#l6">壁越しに見せる</a></li>
+        </ol>
+      </li>
+      <li><a href="#bounds">Bounds</a>
+        <ol>
+          <li><a href="#b1">新しいメッシュは bounds を指定</a></li>
+          <li><a href="#b2">平面・回転するメッシュ</a></li>
+          <li><a href="#b3">遠くまで伸びるエフェクト</a></li>
+          <li><a href="#b4">ビルド結果で点検</a></li>
+        </ol>
+      </li>
+      <li><a href="#color">色のズレ</a>
+        <ol>
+          <li><a href="#c1">色よりプロパティが先</a></li>
+          <li><a href="#c2">Anchor・Root・bounds の統一</a></li>
+          <li><a href="#c3">色の値のルール</a></li>
+          <li><a href="#c4">エディター比較の限界</a></li>
+          <li><a href="#c5">ビルドツールが変える色</a></li>
+          <li><a href="#c6">測り方</a></li>
+        </ol>
+      </li>
+      <li><a href="#pitfalls">その他のルール</a>
+        <ol>
+          <li><a href="#p-hard">慣れた人でもハマること</a></li>
+          <li><a href="#p-layer">オブジェクトレイヤーと Culling Mask</a></li>
+          <li><a href="#p-mesh">メッシュ・パフォーマンス</a></li>
+          <li><a href="#p-anim">アニメーター・同期</a></li>
+          <li><a href="#p-import">インポート・パイプライン</a></li>
+        </ol>
+      </li>
+      <li><a href="#workflow">作業の原則</a></li>
+    </ol>
+  </nav>
+
+  <main id="main">
+    <h1>Unity 現場ノート</h1>
+    <p class="lede">VRChat アバターを Unity で作りながらまとめたルールです。項目ごとに、守らないと何が起きるか、そしてどうすればよいかを書きました。</p>
+    <ul class="meta" aria-label="環境">
+      <li>Unity 2022.3.22f1</li>
+      <li>VRChat SDK 3.10.x</li>
+      <li>lilToon 2.x</li>
+      <li>Modular Avatar</li>
+      <li>Avatar Optimizer (AAO)</li>
+      <li>NDMF</li>
+    </ul>
+
+    <section id="about" aria-labelledby="about-h">
+      <h2 id="about-h"><span class="num">0</span>読み方</h2>
+      <dl class="qa">
+        <dt>項目はどう読めばいいですか？</dt>
+        <dd>カードの一番上の<span class="ask">質問</span>は、その症状があるときにこの項目を見てほしいという目印です。その下の太字の見出しがルールです。<strong class="tag-bad">しないと</strong>にはルールを守らなかったときに実際に起きたことを、<strong class="tag-do">こうする</strong>にはそれを防ぐ方法を書きました。</dd>
+        <dt>バッジは何を意味しますか？</dt>
+        <dd>特に表示のない内容は、自分で経験して測って確かめたものです。原因を再現で確かめられなかったものには<span class="badge est">推定</span>、経験ではなく Unity の一般的な動作を説明したものには<span class="badge gen">一般</span>を付けました。</dd>
+        <dt>ほかのバージョンでも当てはまりますか？</dt>
+        <dd>すべて上の環境で確かめたものなので、バージョンが違うと動作が異なる場合があります。パフォーマンスランクの上限は<a href="https://creators.vrchat.com/avatars/avatar-performance-ranking-system/">公式の表</a>で確認するのが確実です。</dd>
+      </dl>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="layers" aria-labelledby="layers-h">
+      <h2 id="layers-h"><span class="num">1</span>レンダリングレイヤー (Render Queue)</h2>
+      <dl class="qa">
+        <dt>ここでいうレイヤーとは何ですか？</dt>
+        <dd>マテリアルの <code>Render Queue</code> の数値です。オブジェクトレイヤー（0〜31、<a href="#p-layer">4章</a>）やアニメーターレイヤーとは別物です。この数値は描画順で、小さいものから描かれます。</dd>
+        <dt>なぜ順番が大事なのですか？</dt>
+        <dd>先に描いたものが深度（ZWrite）とステンシルを残し、後から描くものはその記録を見て描くかどうかを決めるからです。</dd>
+      </dl>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-queue">
+        <table class="nowrap-2 stack queue">
+          <caption id="cap-queue">Render Queue の区間 <span class="badge gen">一般</span></caption>
+          <thead><tr><th class="num">数値</th><th>名前</th><th>ふつうここにあるもの</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1000</td><td>Background</td><td>空のように最初に描くもの</td></tr>
+            <tr><td class="num">2000</td><td>Geometry</td><td>不透明なもの。体、顔、顔に描かれた素の目</td></tr>
+            <tr><td class="num">2450</td><td>AlphaTest</td><td>カットアウト。アバターでは深度を書く半透明の髪をこのあたりに置くこともあります</td></tr>
+            <tr class="hl"><td class="num">2500</td><td>境界</td><td>2500 までは不透明として近いものから、2501 からは半透明として遠いものから描きます。半透明同士の距離はレンダラーの bounds の中心で測ります</td></tr>
+            <tr><td class="num">3000</td><td>Transparent</td><td>ガラス、水、エフェクト、一部の目のシェーダー</td></tr>
+            <tr><td class="num">4000</td><td>Overlay</td><td>すべての上に重ねるもの</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-queue-t"><svg viewBox="0 66 640 170" role="img" aria-labelledby="fig-queue-t fig-queue-d">
+          <title id="fig-queue-t">目のシェーダーのキューを前髪の直前に移すと、前髪越しに目が見えます</title>
+          <desc id="fig-queue-d">直す前は顔 2000、前髪 2450、目 3000 の順に描くので、目が前髪の残した深度に遮られます。直した後は顔 2000、目 2449、前髪 2450 の順なので、前髪が目の上に半透明で重なります。</desc>
+          <text class="svg-text" x="40" y="86" font-size="13" font-weight="700">直す前</text>
+          <rect x="40" y="94" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="119" font-size="13" text-anchor="middle">顔 2000</text>
+          <rect x="230" y="94" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="315" y="113" font-size="13" text-anchor="middle">前髪 2450</text>
+          <text class="svg-muted" x="315" y="128" font-size="11" text-anchor="middle">半透明 + 深度を書く</text>
+          <rect x="430" y="94" width="170" height="40" rx="6" fill="none" stroke="var(--warn)" stroke-width="2"/>
+          <text class="svg-warn" x="515" y="113" font-size="13" text-anchor="middle">目 3000</text>
+          <text class="svg-warn" x="515" y="128" font-size="11" text-anchor="middle">前髪の深度に遮られて消える</text>
+          <text class="svg-text" x="40" y="176" font-size="13" font-weight="700">直した後</text>
+          <rect x="40" y="184" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="209" font-size="13" text-anchor="middle">顔 2000</text>
+          <rect x="230" y="184" width="80" height="40" rx="6" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <text class="svg-accent" x="270" y="209" font-size="13" text-anchor="middle">目 2449</text>
+          <rect x="320" y="184" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="405" y="203" font-size="13" text-anchor="middle">前髪 2450</text>
+          <text class="svg-muted" x="405" y="218" font-size="11" text-anchor="middle">目の上に半透明で重なる</text>
+        </svg></div>
+        <figcaption>左から右へ描きます。目を前髪のすぐ前の番号に移すだけです。<span class="fig-hint">狭い画面では図を横にスクロールして見てください。</span></figcaption>
+      </figure>
+      <div class="rule">
+        <span class="label">原則</span>
+        <p>キューは「誰が誰の深度とステンシルを見て描くべきか」で決めます。番号はすぐ前後に来る相手にくっつけて付け、間にほかのものが割り込む余地があれば間隔を空けます。</p>
+      </div>
+
+      <article class="case" id="l1">
+        <p class="ask">半透明の前髪越しに、目がまるごと消えていませんか？</p>
+        <h3>1-1. 半透明越しに見えるべきものは、その半透明より先に描きます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>前髪が深度を書く半透明（2450）で目のシェーダーが 3000 だと、目を描く番には前髪がもう深度を埋めた状態です。そのため前髪越しに透けるはずの目がまるごと抜けます。顔に描かれた素の目は 2000 なので問題がなく、目を替えてから初めて表に出ました。</dd>
+          <dt class="do">こうする</dt><dd>目を前髪のすぐ前の番号（2449）に移します。キューを動かすと、間にあったものとの順番も変わります。ここでは 2460 にあった頬染め・涙エフェクトが目の上に乗るようになったので、周りのエフェクトまで確認し直しました。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l2">
+        <p class="ask">遮蔽メッシュを入れたら、隠すべきでないものまで切れて見えていませんか？</p>
+        <h3>1-2. 深度だけを書く遮蔽メッシュは、隠すべきもののすぐ前に置きます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>ボートの中に水が見えないよう、深度だけを書く遮蔽メッシュ（<code>ColorMask 0</code>、<code>ZWrite On</code>）を 2010 に置いたら、2450 のカットアウトのアバターより先に深度を書いてしまいました。その結果、ボートに立つ人の足が船べりの下で切れて見えました。</dd>
+          <dt class="do">こうする</dt><dd>
+            <p>遮蔽メッシュを 2999 に移し、不透明とカットアウトをすべて描いた後、水（3000）の直前で深度を書くようにしました。ただし遮蔽メッシュより後に描かれるものは相変わらず隠れるので、3000 以上の半透明のアバター部位はボートの中で切れることがあります。</p>
+            <p>板の後ろを通るエフェクトだけを隠したいときも同じ方法を使います。板に深度を書かせ、エフェクトを板より後の番号に置けば済みます。ステンシルで切ると、板の手前を通る部分まで一緒に切れます。</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l3">
+        <p class="ask">半透明同士が重なるところで、後ろにあるべきものが手前に透けて見えていませんか？</p>
+        <h3>1-3. 半透明同士が重なるなら、手前に来るべき側に深度を書かせます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>深度を書かない半透明パネルの上に水が後から重ねて描かれ、パネルの下半分が水越しに透けて見えました。2501 以上は bounds の中心までの距離で順番を決めるので、見る位置によって順番がひっくり返ることもあります。<span class="badge gen">一般</span></dd>
+          <dt class="do">こうする</dt><dd>手前に来るべきパネルは <code>ZWrite On</code> に変え、完全に透明な部分は <code>clip</code> で捨てます。キューも光の筋 2980、パネル 2990、UI 3000 のように分けます。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l4">
+        <p class="ask">ステンシルの効果が出ない、またはほかの素体の髪を持ってきたら顔の影が消えた、ということはありませんか？</p>
+        <h3>1-4. ステンシルは書く側と読む側の順番をキューで固定し、番号がかぶっていないかを先に見ます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>読む側が先に描かれると、ステンシルがまだ空なので何も出ません。番号がかぶると、ほかのシェーダーが値を上書きすることがあります。<span class="badge est">推定</span> 素体ごとに顔のステンシル番号が違うので（例: 86 と 92）、ほかの素体の髪を持ってくるなら番号を合わせないと顔の疑似影が出ません。</dd>
+          <dt class="do">こうする</dt><dd>
+            <p>書く側と読む側を 1 ずつ離して順番を固定します。缶の中の液体を例にすると、穴の形のマスク（ステンシルだけ書く）を 2001、内側の壁を 2002、半透明の液体はその後ろに置きました。</p>
+            <p>新しくステンシルを使う前に、アバターにすでにある番号（目の透け、疑似影、素体のギミック）を調べて避けます。複数のビットを長く保持する必要があるなら Overlay の直前（例: 3989〜4000）にまとめてほかのシェーダーが割り込む隙を減らし、毎回クリアしてから始めます。<span class="badge est">推定</span></p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l5">
+        <p class="ask">シェーダーを替えたら、合わせておいた描画順が崩れていませんか？</p>
+        <h3>1-5. シェーダーを替えたりマテリアルを複製したりしたら、キューを確認し直します <span class="badge gen">一般</span></h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>キューが <code>From Shader</code> になっていると（<code>.mat</code> では <code>m_CustomRenderQueue: -1</code>）、シェーダーを替えた瞬間にキューも一緒に変わります。せっかく合わせた順番が、シェーダー変換ツールを一度回しただけで崩れることがあります。</dd>
+          <dt class="do">こうする</dt><dd>順番が大事なマテリアルはキューを数値で固定します。シェーダーを替えたり一括変換したりした後は、ビルド結果からキューを読み直します。同じ番号に複数をまとめるより、2451、2452 のように分けて順番をはっきりさせるほうが安全です。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l6">
+        <p class="ask">壁越しに見えるようにしたら、奥行き感がなくなっていませんか？</p>
+        <h3>1-6. 壁越しに見せるときは、隠れた部分を違う描き方にします</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd><code>ZTest Always</code> だけで描くと、標識がすべての物体の上に同じ濃さで描かれ、壁の向こうの床の標識の奥行き感がなくなりました。</dd>
+          <dt class="do">こうする</dt><dd>
+            <p>同じものを 2 回描きます。見える部分は <code>ZTest LEqual</code> で、隠れた部分は <code>ZTest Greater</code> で別の色にします。手首のアクセサリーが袖に埋まっていないかを見るエディターのギズモをこうして作りました。アクセント色と赤で 2 回描くので、どの方向から見ても赤ければ袖の中に埋まっています。壁越しの標識にも同じ方法（隠れた部分だけ薄く）が使えます。<span class="badge est">推定</span></p>
+            <p>頂点シェーダーで遠くへ動かして描くメッシュは bounds もその分大きくする必要があり、そうするとパフォーマンスの Bounds も大きくなります（<a href="#b3">2-3</a>）。</p>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="bounds" aria-labelledby="bounds-h">
+      <h2 id="bounds-h"><span class="num">2</span>Bounds</h2>
+      <dl class="qa">
+        <dt>Bounds とは何ですか？</dt>
+        <dd>レンダラーごとに 1 つずつある箱です。この箱がカメラの視界の外にあると、メッシュ全体が描かれません。<span class="badge gen">一般</span></dd>
+        <dt>メッシュが動けば、箱もついて大きくなりますか？</dt>
+        <dd>なりません。SkinnedMeshRenderer の箱は、<code>Update When Offscreen</code> がオフなら（既定値）頂点に合わせて計算し直されません。<code>Root Bone</code> に付いた固定サイズの箱がその骨についていくだけです。<span class="badge gen">一般</span></dd>
+        <dt>カリング以外にも使われますか？</dt>
+        <dd>はい。半透明の描画順（<a href="#layers">1章</a>）、ライトプローブを読む位置とライトの判定（<a href="#c2">3-2</a>）もこの箱が基準です。<span class="badge gen">一般</span></dd>
+      </dl>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-merge-t"><svg viewBox="0 0 640 270" role="img" aria-labelledby="fig-merge-t fig-merge-d">
+          <title id="fig-merge-t">箱は Hips に固定されているので、上体を倒すと頭が箱の外に出ます</title>
+          <desc id="fig-merge-d">左: 立っているときは、頭にぴったり合った箱の中に頭があります。右: 上体を倒しても箱はそのままなので、頭が外に出ます。体全体の大きさの箱に替えれば、倒しても中に収まります。</desc>
+          <rect class="svg-box" x="125" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <line class="svg-line" x1="153" y1="200" x2="153" y2="112" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="153" cy="80" r="20" fill="none" class="svg-line" stroke-width="3"/>
+          <path d="M136 72 q17 -22 36 0" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="153" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="165" y="205" font-size="13">Hips</text>
+          <text class="svg-text" x="153" y="250" font-size="15" text-anchor="middle">立っているとき</text>
+          <rect class="svg-box-ok" x="380" y="18" width="200" height="214" stroke-width="1.5" stroke-dasharray="2 4"/>
+          <text class="svg-accent" x="574" y="36" font-size="12" text-anchor="end">体全体の箱</text>
+          <rect class="svg-box" x="425" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <text class="svg-muted" x="453" y="126" font-size="12" text-anchor="middle">部位に合わせた箱</text>
+          <line class="svg-line" x1="453" y1="200" x2="497" y2="124" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="513" cy="96" r="20" fill="none" stroke="var(--warn)" stroke-width="3"/>
+          <path d="M501 81 q22 -14 32 12" fill="none" stroke="var(--warn)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="453" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="465" y="205" font-size="13">Hips</text>
+          <text class="svg-warn" x="540" y="144" font-size="13">箱の外なので</text>
+          <text class="svg-warn" x="540" y="161" font-size="13">描かれない</text>
+          <text class="svg-text" x="480" y="250" font-size="15" text-anchor="middle">上体を倒したとき</text>
+        </svg></div>
+        <figcaption>背骨が曲がっても Root Bone（Hips）は傾きません。そのため頭や足のように Root Bone から遠い部位が先に箱からはみ出します。<span class="fig-hint">狭い画面では図を横にスクロールして見てください。</span></figcaption>
+      </figure>
+
+      <article class="case" id="b1">
+        <p class="ask">かがんだり座ったりすると、前髪や靴が特定の角度で消えていませんか？</p>
+        <h3>2-1. メッシュを新しく作ったら、bounds を自分で指定します</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>結合したメッシュやほかの素体から移したメッシュは、元の小さい箱をそのまま引き継ぎます。立ち姿勢で部位にぴったり合わせた箱なので、かがんだり座ったりすると前髪や靴が箱の外に出て、見る角度によってはまるごと消えます。結合ツールで bounds を 0 のまま空けておくと元の箱を合わせた大きさが使われるので、結果は同じです。</dd>
+          <dt class="do">こうする</dt><dd>Root Bone を <code>Hips</code> にして、体全体を覆う箱を入れます。たとえば center 0、extents <code>0.5 / 0.8 / 0.3</code> m や 2 m の立方体くらいで十分です。体に付くレンダラー（体、髪、服、アクセサリー）はすべて同じ箱にそろえておくとよいです。箱が同じなら AAO の自動結合もまとめやすくなります。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b2">
+        <p class="ask">平らなメッシュやくるくる回るメッシュの箱は、どれくらい取ればいいですか？</p>
+        <h3>2-2. 平たいメッシュや回転するメッシュは、箱に余裕を持たせます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>完全に平らなメッシュは箱の厚みが 0 になります。基準点を中心に回るメッシュ（ビルボードなど）は、回った頂点が箱の外に出て切れることがあります。<span class="badge est">推定</span></dd>
+          <dt class="do">こうする</dt><dd>厚みは 1 cm ほど付けておくのが安全です。回るメッシュはあらかじめ回転半径の分（例: ±0.25 m）広げておきます。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b3">
+        <p class="ask">長いエフェクトを入れたら、Bounds の数値が数十 m に膨らんでいませんか？</p>
+        <h3>2-3. 遠くまで伸びるエフェクトは、箱を別に管理します</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>レーザーやスキャンのように数十 m 伸びるエフェクトが、アバター全体の Bounds を 1.0 × 1.65 × 0.6 m から 66.8 × 59.8 × 30 m に広げ、そのアバターは Very Poor になりました（一緒に入れた Light 2 つも原因です）。ふだんオフにしているオブジェクトも統計には入ります。</dd>
+          <dt class="do">こうする</dt><dd>体に付くものは体の大きさの箱にそろえ、長いエフェクトだけを必要な大きさにします。ランクが問題になるなら、そのエフェクトを切れるオプションを用意します。箱が小さければ消え、大きければランクが下がるので、どちらを受け入れるかを選ぶ問題です。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b4">
+        <p class="ask">箱が十分な大きさかどうか、アップロード前にどう確かめればいいですか？</p>
+        <h3>2-4. bounds はビルド結果で頂点と比べて点検します</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>T ポーズの静止画面では表に出ません。アップロードしてから「特定の角度で消える」と言われて、初めて気づくことになります。</dd>
+          <dt class="do">こうする</dt><dd>
+            <ol>
+              <li>アバターの複製を NDMF でビルドします。実際にアップロードされるのは結合が終わったメッシュだからです。</li>
+              <li>レンダラーごとに <code>BakeMesh</code> で今の姿勢の頂点を焼いて箱と比べ、箱の外に出た頂点の数と一番遠い距離を測ります。</li>
+              <li>かがんだ姿勢、座った姿勢でも繰り返し、揺れるアクセサリーは実際に回しながら測ります。</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="color" aria-labelledby="color-h">
+      <h2 id="color-h"><span class="num">3</span>色のズレ</h2>
+      <dl class="qa">
+        <dt><code>_Color</code> を合わせたのに、なぜ色が違って見えるのですか？</dt>
+        <dd><code>_Color</code> は最終的な色ではなく、テクスチャに掛ける倍率です。その結果の上に、ライティング、輪郭線、ビルドツールがさらに手を加えます。だから色の値を合わせる前に、色の値以外のものから合わせる必要があります。</dd>
+      </dl>
+
+      <article class="case" id="c1">
+        <p class="ask">同じ <code>_Color</code> を入れたのに、前髪と後ろ髪の色が分かれていませんか？</p>
+        <h3>3-1. 違うアセットを組み合わせるときは、<code>_Color</code> よりプロパティの比較が先です</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>作者の違う前髪と後ろ髪を組み合わせたとき、同じ <code>_Color</code> を入れても、別々に計算して合わせても、角度やライティングが変わるとまた色が分かれました。</dd>
+          <dt class="do">こうする</dt><dd>
+            <p>2 つのマテリアルのプロパティをすべて比べて、色以外の違いからなくします。実際に原因だったのは次のものです。</p>
+            <ul>
+              <li>明るさの上限（lilToon <code>_LightMaxLimit</code>）。片方だけ低いと、明るいライティングでだけそちらが頭打ちになります。</li>
+              <li>マットキャップ。片方だけオンだと、視点によって光沢の帯が回ります。</li>
+              <li>輪郭線の幅と輪郭線テクスチャ。薄い板の多いメッシュは、太い輪郭線が面を覆って全体が暗くなります。</li>
+            </ul>
+            <p>次にテクスチャの彩度を 0 にして明度で地の明るさを合わせ、両方に同じ <code>_Color</code> を掛けます。こうすると色味が 1 つの値からしか出ないので、少なくとも色の値のせいで分かれることはありません。ライティングのせいで分かれる場合は 3-2 で扱います。</p>
+            <p>衣装では、比べてみたら <code>_Cull</code> とシェーダーの種類だけが違っていたこともあります。比べれば直す場所はすぐに絞れます。</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c2">
+        <p class="ask">エディターでは同じなのに、特定のワールドでだけ髪のパーツ同士の明るさが違っていませんか？</p>
+        <h3>3-2. ひとかたまりに見せたいレンダラーは、Probe Anchor、Root Bone、bounds をそろえます</h3>
+        <figure>
+          <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-probe-t"><svg viewBox="0 0 640 250" role="img" aria-labelledby="fig-probe-t fig-probe-d">
+            <title id="fig-probe-t">ライトプローブを読む位置がレンダラーごとに違います</title>
+            <desc id="fig-probe-d">前髪は Chest でプローブを読み、Anchor のない後ろ髪は自分の箱の中心、つまり Chest より後ろで読みます。</desc>
+            <g opacity=".5">
+              <circle cx="60" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="60" cy="180" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="180" r="5" style="fill:var(--steel)"/>
+            </g>
+            <text class="svg-muted" x="68" y="48" font-size="12">ライトプローブ</text>
+            <circle cx="250" cy="80" r="34" fill="none" class="svg-line" stroke-width="3"/>
+            <path d="M226 62 q30 -30 56 4" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M222 70 q-28 40 -36 140" fill="none" stroke="var(--steel)" stroke-width="10" stroke-linecap="round"/>
+            <line class="svg-line" x1="250" y1="114" x2="250" y2="215" stroke-width="4" stroke-linecap="round"/>
+            <rect class="svg-box" x="170" y="56" width="58" height="160" stroke-width="2" stroke-dasharray="5 4"/>
+            <circle cx="250" cy="150" r="7" style="fill:var(--accent)"/>
+            <text class="svg-accent" x="262" y="154" font-size="13">Chest — 前髪が読む場所</text>
+            <path d="M193 130 l12 12 M205 130 l-12 12" stroke="var(--warn)" stroke-width="3"/>
+            <text class="svg-warn" x="150" y="238" font-size="13" text-anchor="middle">後ろ髪の箱の中心（Anchor なし）</text>
+            <text class="svg-text" x="400" y="40" font-size="14">直した後、髪のレンダラーすべて</text>
+            <text class="svg-text" x="400" y="60" font-size="14">Probe Anchor = Chest</text>
+            <text class="svg-text" x="400" y="80" font-size="14">Root Bone = Hips</text>
+            <text class="svg-text" x="400" y="100" font-size="14">bounds = 同じ箱</text>
+          </svg></div>
+          <figcaption>横から見た図です。右が顔の向きです。<span class="fig-hint">狭い画面では図を横にスクロールして見てください。</span></figcaption>
+        </figure>
+        <dl>
+          <dt class="bad">しないと</dt><dd>エディターではまったく同じなのに、ライトプローブを焼いたワールドや点光源のあるワールドでだけ、前髪と後ろ髪の色と明るさが分かれました。Anchor のないレンダラーは自分の箱の中心でプローブを読み、点光源を Pixel と Vertex に振り分ける判断もレンダラーごとに別々に行うためと見ています。<span class="badge est">推定</span> 原因そのものは再現できませんでしたが、下のようにそろえた後、インゲームで差がなくなりました。</dd>
+          <dt class="do">こうする</dt><dd>Modular Avatar の <code>MA Mesh Settings</code> で、体、髪、服のレンダラーを Probe Anchor は Chest、Bounds Root は Hips、箱は同じ大きさにそろえます。販売されている prefab ごとにこの値がまちまちなので、アセットを混ぜるたびに確認が必要です。</dd>
+        </dl>
+      </article>
+
+      <section id="c3" aria-labelledby="c3-h">
+        <p class="ask">入れた色の値と違う色が出ていませんか？</p>
+        <h3 id="c3-h">3-3. 色の値はこのルールどおりに入れます</h3>
+        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-colorrules">
+          <table class="stack pair" style="--label-2: 'しないと'">
+            <caption id="cap-colorrules">色の値のルール</caption>
+            <thead><tr><th>ルール</th><th>しないと</th></tr></thead>
+            <tbody>
+              <tr><td><code>.mat</code> に保存された <code>_Color</code> に 255 を掛けると、インスペクターの 16 進数の値になります。外で計算して入れるときに sRGB・linear 変換をしません</td><td>見当違いの色が入ります。変換はシェーダーに渡すときに Unity が行います <span class="badge gen">一般</span></td></tr>
+              <tr><td>グラデーションマップは <code>linear_to_srgb()</code> であらかじめ補正して焼きます。シェーダーが linear の明るさで読むからです</td><td>意図より暗い区間を読んで色がくすみます</td></tr>
+              <tr><td>グラデーションマップは圧縮 None、Wrap Clamp にします。マスクテクスチャは sRGB をオフにします</td><td>帯に段差ができ、端に黒い縁ができます</td></tr>
+              <tr><td>彩度を大きく上げたいなら、白地のテクスチャに <code>_Color</code> を掛けて色を決め直します</td><td>HSV の回転は元の彩度をそのまま引きずるので、くすんだ色はくすんだまま残ります。黒いテクスチャには何を掛けても 0 です</td></tr>
+              <tr><td>1 を超える HDR カラーはピッカーの Intensity を使わず、スクリプト（<code>Material.SetColor</code>）や Debug インスペクターで値を直接入れます</td><td>RGB が正規化し直されて値がつぶれます</td></tr>
+              <tr><td>lilToon の色調補正の明度（V）は、レンダリングして測りながら合わせます</td><td>出力が非線形なので予想が外れます。7% 下げても結果は 3% ほどしか変わりませんでした</td></tr>
+              <tr><td>完全な黒（<code>#000000</code>）は使いません</td><td>光をまったく受けないので穴のように見えます</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <article class="case" id="c4">
+        <p class="ask">エディターで合わせた金属や光沢が、インゲームで違って見えていませんか？</p>
+        <h3>3-4. エディターのレンダリングで判断できないものは、インゲームで切り替えながら比べます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>確認用のエディターのシーンにはリフレクションプローブがなく、ライトプローブや点光源もないことが多いです。Standard シェーダーの金属は真っ黒に出て、ライティングによる違いも見えないので、エディターで出した結論がインゲームとずれます。</dd>
+          <dt class="do">こうする</dt><dd>2 つのマテリアルをメニューで切り替えられるトグル（MA Menu Item と Material Swap）を入れて、インゲームで比べます。Standard からトゥーンシェーダーに移すときは、アルベド色をそのまま持ってきません。反射の色味用なので明るめに設定されていて、そこだけ浮いて見えます。反射とスペキュラーはオフにして、金属らしさはマットキャップで出します。</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c5">
+        <p class="ask">インスペクターの値はそのままなのに、アップロードすると色が変わっていませんか？</p>
+        <h3>3-5. ビルドツールが変えた色は、ビルド結果を比べて見つけます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>インスペクターの値はそのままなのに、結果の色が違います。たとえば明るさ調整ツール（Light Limit Changer、当時使っていた v2 の場合）はレンダラー単位でアニメーションをかけるので、同じレンダラーにあった Unlit のオーバーレイも一緒に変わりました。色調補正が既定値の lilToon マテリアルはビルド時にマスクが空になり、Standard マテリアルはツールの対象外なので、そこだけ明るさが別の動きをしました。</dd>
+          <dt class="do">こうする</dt><dd>
+            <ol>
+              <li>複製を NDMF でビルドしてビルド前後のマテリアルを比べ、<code>material.*</code> に触れるアニメーションをすべて洗い出します。当て推量で機能を 1 つずつ切ってみることはしません。</li>
+              <li>問題になる機能はツール側でオフにします。マスクに頼る効果はテクスチャに焼き込みます。</li>
+              <li>一緒に明るくなるべきマテリアルは、同じ系統のシェーダーにそろえます。</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c6">
+        <p class="ask">2 つの色が本当に違うのか、どう判断すればいいですか？</p>
+        <h3>3-6. 色は同じ条件でレンダリングして、数値で比べます</h3>
+        <dl>
+          <dt class="bad">しないと</dt><dd>別々に撮った画面キャプチャ同士で絶対値を比べると、ライティングと角度の違いが混ざります。これで 2 回判断を誤りました。画面キャプチャには UI、選択のアウトライン、ギズモも混ざります。</dd>
+          <dt class="do">こうする</dt><dd>シーンカメラを決まった解像度とアンチエイリアスで PNG に直接レンダリングするツールを使います。比べる部位を切り出して中央値を見て、暗い線は明るさ上位 60% だけを残して除きます。地のテクスチャの候補も目で選ばず、中央値の RGB と彩度を出して判定します。同梱の候補 3 つを測ったら、どれも掛け算に使えないほど暗かったこともあります。</dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="pitfalls" aria-labelledby="pitfalls-h">
+      <h2 id="pitfalls-h"><span class="num">4</span>その他のルール</h2>
+
+      <h3 id="p-hard">慣れた人でもハマること</h3>
+      <ul class="pitfalls">
+        <li><strong>アバターを複製したら、まず Blueprint ID を空にし、ファイルに残っていないかを確認します。</strong><p><span class="tag-bad">しないと</span>シーンの <code>Save As</code> は既存の ID をそのまま引き継ぎ、別のアバターを上書きアップロードさせます。prefab Variant も親の ID を引き継ぎます（ほかのツール作者が実際に上書きした例があります）。Build &amp; Test はシーンにテスト用の ID を新しく書き込みます。さらに SDK はシーンを開くときに ID をメモリ上でだけ空にするのでボタンが Attach に変わりますが、保存してもファイルには ID が残っています。</p><p><span class="tag-do">こうする</span>シーンのオーバーライドを空の値で保存した後、ファイルで <code>blueprintId</code> を直接確認します。アップロード前には、すべてのシーンと prefab の ID がかぶっていないかを検査します。</p></li>
+        <li><strong>初回アップロードの前は SDK のウィンドウを閉じません。</strong><p><span class="tag-bad">しないと</span>初回アップロード前は名前、説明、サムネイルがシーンに保存されないので、ウィンドウを閉じた瞬間に消えます。</p></li>
+        <li><strong>Unity が開いているアセットは、外からファイルとして書き換えません。</strong><p><span class="tag-bad">しないと</span>Unity が持っていた内容で上書きし直され、修正が消えます。新しいファイルを追加すること（<code>.meta</code> を先に置いて Refresh）は問題ありません。</p></li>
+        <li><strong>スクリプトを直したら、コンパイルが終わったのを確かめてからツールを実行します。</strong><p><span class="tag-bad">しないと</span>古いコードが動いて、直した内容が反映されていない結果を信じることになります。ツールに実行時刻と結果をログファイルへ残させておくと確認しやすくなります。</p></li>
+        <li><strong>コミットの前に変わったファイルの一覧を見て、パッケージの入れ替えは別にコミットします。</strong><p><span class="tag-bad">しないと</span>Play や SDK を動かしている間に Unity が書き直した <code>ProjectSettings</code> や、パッケージのバージョンが変わって一斉に保存し直されたマテリアルが、別の作業のコミットに混ざります。パッケージを替えた後も、Refresh までは古いバージョンで動きます。</p></li>
+      </ul>
+
+      <h3 id="p-layer">オブジェクトレイヤー（0〜31）と Culling Mask</h3>
+      <dl class="qa">
+        <dt>VRChat で体はどのレイヤーにありますか？</dt>
+        <dd>一人称で見る自分の体は <code>PlayerLocal(10)</code>、鏡に映る自分の体は <code>MirrorReflection(18)</code>、他人の体は <code>Player(9)</code> レイヤーにあります。<code>21(reserved4)</code> は空いているレイヤーとして使えます。<span class="badge gen">一般</span></dd>
+      </dl>
+      <ul class="pitfalls">
+        <li><strong>体に付けたライトは、Culling Mask から 10 と 18 を外します。</strong><p><span class="tag-bad">しないと</span>すぐ目の前にある自分の手や体が白飛びします。一人称でも、鏡でも。</p></li>
+        <li><strong>深度テクスチャが必要なら、何も照らさない Directional Light を入れます。</strong> 強さは 0.001 にします。0 だと Unity がそのライトを飛ばします。影は Hard で強さ 0、Culling Mask は空のレイヤー 21 だけをオンにします。Nothing にすると深度ができません。<p><span class="tag-bad">しないと</span>ライトをすべて焼いたワールドでは <code>_CameraDepthTexture</code> がないので、床や壁に沿って広がるはずのエフェクトが面に沿いません。</p><p>代わりに Light が 1 つ増えてランクが下がり、そのワールドで初めてオンにしたときに一瞬カクつくことがあります。<span class="badge est">推定</span></p></li>
+        <li><strong>パーティクルの Collides With で 9、10、18 をオフにします</strong>（マスク値 <code>-263681</code>）。<p><span class="tag-bad">しないと</span>人の体に当たって跳ねます。逆にレイヤー 18 に置いた BoxCollider は着用者と当たるので、上に乗って立てます。</p></li>
+      </ul>
+
+      <h3 id="p-mesh">メッシュ・パフォーマンス</h3>
+      <ul class="pitfalls">
+        <li><strong>シェイプキーで隠した部分は、AAO Remove Mesh By BlendShape で消します。</strong><p><span class="tag-bad">しないと</span>見えないポリゴンがそのまま残ります。最適化ツールも消してくれません。</p></li>
+        <li><strong>使わないオブジェクトはオフにせず削除します。</strong><p><span class="tag-bad">しないと</span>オフでも Material Slots と Texture Memory にそのまま数えられます。</p></li>
+        <li><strong>輪郭線がいらないなら、輪郭線のないシェーダーに替えます。</strong><p><span class="tag-bad">しないと</span><code>lilToonOutline</code> は輪郭線をオフにしても描き、スロットごとにドローコールが 2 回発生します。</p></li>
+        <li><strong>販売テクスチャの Max Size は <code>.meta</code> の <code>platformSettings</code> で確認します。</strong><p><span class="tag-bad">しないと</span>2048 に見えても、プラットフォーム設定がオフだと 4096 で入り、Texture Memory が膨らみます。</p></li>
+        <li><strong>骨がなくシェイプキーだけある FBX には、SkinnedMeshRenderer を自分で作って付けます。</strong><p><span class="tag-bad">しないと</span>MeshRenderer として入るので、シェイプキーをアニメーションできません。</p></li>
+        <li><strong>ゆったりした服は <code>_Cull</code> を Off にします。</strong><p><span class="tag-bad">しないと</span>内側の面が抜けて見えます。</p></li>
+      </ul>
+
+      <h3 id="p-anim">アニメーター・同期</h3>
+      <ul class="pitfalls">
+        <li><strong>位置を軸ごとに別々に動かすなら、Transform も軸ごとに分けます。</strong><p><span class="tag-bad">しないと</span><code>m_LocalPosition</code> の x だけをアニメーションしても、クリップが y と z まで書いて 0 にします。</p></li>
+        <li><strong>WD off のブレンドツリーでは、すべての子モーションが同じプロパティを書くようにします。</strong><p><span class="tag-bad">しないと</span>一部の子だけが書くプロパティは、その子以外のときにおかしな値に飛びます。</p></li>
+        <li><strong>Direct ブレンドツリーの子は、プロパティごとに 1D ツリー 1 つにして、ウェイトの合計が 1 になるようにします。</strong><p><span class="tag-bad">しないと</span>クリップを直接子に入れると、ほかの子と値が足し合わされます。ミュートを外したら時計の大きさが 2 倍になったことがあります。</p></li>
+        <li><strong>オンオフする全身のポーズは Action レイヤーでかけ、トラッキングを残したい部位はマスクから外します。</strong><p><span class="tag-bad">しないと</span>Base レイヤーは強さを調整できないので、最後のポーズが残ります。Action レイヤーは IK の上にかぶさるので、マスクに腕が入っていると VR の手が固まります。</p></li>
+        <li><strong>他人に見せたいポーズはアニメーションで作ります。</strong> <span class="badge est">推定</span><p><span class="tag-bad">しないと</span>頭や手などのトラッキング点が 1 つでも Tracking だと、他人の画面では自分の体が Networked IK で描かれます。自分の側だけで回る骨の回転（Constraint など）は他人には見えません。</p><p><span class="tag-do">こうする</span>見せたい部位は Tracking Control を Animation にし、体全体の回転は Locomotion Control で止めます。</p></li>
+        <li><strong>アニメーションが書くパラメーター（AAP）は入力に使いません。</strong><p><span class="tag-bad">しないと</span>AAP に同期やドライバーで値を入れても、アニメーションが毎フレーム上書きし直します。</p></li>
+        <li><strong>確率の判定は着用者の側だけで回し、結果だけを同期します。</strong><p><span class="tag-bad">しないと</span>Random ドライバーと Contact は人ごとに別々に動くので、見る人ごとに結果が違います。</p></li>
+        <li><strong>Contact で距離を測るときは 3 m 以内で設計します。</strong><p><span class="tag-bad">しないと</span>受信半径を大きくしても 3 m で切れます。Proximity の値は面までの距離が離れるほど直線的に小さくなります（1 − 距離/半径）。</p></li>
+        <li><strong>VRC Constraint で 1 軸だけ追従させるのは、水平に固定された親の下でだけ使います。</strong><p><span class="tag-bad">しないと</span>オフにした軸が親基準の値で埋まるので、動く骨の下ではその骨の傾きについていきます。</p></li>
+        <li><strong>Tracking Control で指は No Change にします。</strong><p><span class="tag-bad">しないと</span>Quest のコントローラーでジェスチャーが効かず、指が伸びたまま固まります。</p></li>
+      </ul>
+
+      <h3 id="p-import">インポート・パイプライン</h3>
+      <ul class="pitfalls">
+        <li><strong>新しいアセットは、アップロード検証に引っかかる設定から合わせます。</strong> FBX は Read/Write と Blendshape Normals、テクスチャは Streaming Mip Maps、AAO のマスクテクスチャは Read/Write、オーディオは Load In Background。<p><span class="tag-bad">しないと</span>アップロード検証やビルドで止まります。既存のテクスチャの <code>.meta</code> をコピーして guid だけ替えれば、設定がそのまま付いてきます。</p></li>
+        <li><strong>Blender からアニメーションだけを書き出すときも、メッシュを一緒に入れます。</strong><p><span class="tag-bad">しないと</span>バインドポーズがないので、既定の姿勢が最初のフレームの姿勢に変わります。</p></li>
+        <li><strong>Blender の FBX は <code>Bake Axis Conversion</code> をオフにして取り込みます。</strong><p><span class="tag-bad">しないと</span>子オブジェクトの位置の Y と Z が入れ替わります。</p></li>
+        <li><strong>同じアセットの unitypackage は 1 つだけインポートします。</strong><p><span class="tag-bad">しないと</span>GUID がぶつかって参照がこじれます。インポート前にパッケージを展開して GUID を照らし合わせれば、事前にわかります。</p></li>
+        <li><strong>MA と AAO の結果は Play か Build &amp; Test で確認します。</strong><p><span class="tag-bad">しないと</span>どちらもビルド時にしか動かないので、エディターの画面は結果ではありません。エディターの Play には VRChat のランタイムもないので、Parameter Driver も動きません。</p></li>
+        <li><strong>値を試したら元に戻して、ファイルを確認します。</strong><p><span class="tag-bad">しないと</span>インスペクターでマテリアルの値を変えたまま Play に入ると、NDMF がその値をファイルに書いてしまいます。</p></li>
+        <li><strong>prefab の Overrides は項目ごとに見て、Apply All や Revert All は押しません。</strong><p><span class="tag-bad">しないと</span>Removed の項目を Apply すると prefab アセットから消えます。戻すときはその項目だけを Revert します。</p></li>
+      </ul>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="workflow" aria-labelledby="workflow-h">
+      <h2 id="workflow-h"><span class="num">5</span>作業の原則</h2>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-workflow">
+        <table class="stack pair" style="--label-2: 'しないと'">
+          <caption id="cap-workflow">作業の原則</caption>
+          <thead><tr><th>原則</th><th>しないと</th></tr></thead>
+          <tbody>
+            <tr><td>最終判断はアップロードした後、インゲームで動かしてみてから下します。手、視点、揺れは VR で見ます</td><td>静止画面で通った問題が、姿勢、角度、ライティングによってまた出てきます</td></tr>
+            <tr><td>直す前に、今の値を元のファイルから読みます</td><td>記憶や昔のメモのとおりに直して、間違った値を入れます。<code>_Color</code> の変換ルールを記憶で書いて、実測で正したことがあります</td></tr>
+            <tr><td>機能ごとに、着用者だけに見えるのか他人にも見えるのかを先に表で決めます。同期する値とビット数も一緒に</td><td>着用者の画面でだけ合っていて、他人には違って見えるギミックができます。エディターでは両者を区別できません</td></tr>
+            <tr><td>一度に 1 つだけ変え、変える前にチェックポイントを残します</td><td>何が効いて何が壊したのかがわかりません</td></tr>
+            <tr><td>パフォーマンスはビルド結果で判断し、赤い項目から見ます</td><td>Builder の数値や当て推量で、見当違いの項目を減らすことになります</td></tr>
+            <tr><td>レンダリングの比較は、同じ Play セッションの T ポーズ同士だけで行います</td><td>PhysBone が毎回違う揺れ方をするので、差がノイズに埋もれます</td></tr>
+            <tr><td>確認用のレンダリングで隠したいものは、実際にオフにするか、ビルドした複製を撮ります。<code>forceRenderingOff</code> で真似しません</td><td>NDMF のプレビュー用の代理メッシュがそのまま描かれ、オフにした Material Swap も Scene ビューに反映されて、ビルドと違う絵になります</td></tr>
+            <tr><td>候補は複数をレンダリングして並べてから選びます</td><td>1 つだけ見て判断して、もっと良い案を逃します</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <p>Pyrite9 · 個人の制作記録のうち、ほかの人にも役立つものだけを移しました。間違いがあれば GitHub Issue で教えてください。直します。</p>
+    <p>最終更新 2026-11-26 · <a href="https://creativecommons.org/licenses/by/4.0/deed.ja">CC BY 4.0</a> · <a href="https://github.com/Pyrite9/vrchat-unity-notes">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

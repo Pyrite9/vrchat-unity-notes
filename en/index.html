@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Unity Field Notes — A Method for Making VRChat Avatars</title>
+<meta name="description" content="Rules I follow when making VRChat avatars in Unity: Render Queue, bounds, color drift, and pitfalls that catch experienced creators, each written as what goes wrong if you skip it and what to do instead.">
+<link rel="alternate" hreflang="ko" href="../">
+<link rel="alternate" hreflang="ja" href="../ja/">
+<link rel="alternate" hreflang="en" href="./">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M11 1 21 7v8l-10 6L1 15V7z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 1v20M1 7l10 6 10-6" fill="none" stroke="currentColor" stroke-width="1" opacity=".55"/></svg>
+      Unity Field Notes
+    </a>
+    <nav aria-label="Language">
+      <ul class="lang-switch">
+        <li><a href="../" hreflang="ko" lang="ko">한국어</a></li>
+        <li><a href="../ja/" hreflang="ja" lang="ja">日本語</a></li>
+        <li><a href="./" hreflang="en" lang="en" aria-current="page">English</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">Contents</h2>
+    <ol start="0">
+      <li><a href="#about">How to read</a></li>
+      <li><a href="#layers">Rendering layers (Render Queue)</a>
+        <ol>
+          <li><a href="#l1">Draw see-through targets first</a></li>
+          <li><a href="#l2">Where to put a depth mask</a></li>
+          <li><a href="#l3">Overlapping transparents</a></li>
+          <li><a href="#l4">Stencil order and IDs</a></li>
+          <li><a href="#l5">Queue after a shader swap</a></li>
+          <li><a href="#l6">Showing through walls</a></li>
+        </ol>
+      </li>
+      <li><a href="#bounds">Bounds</a>
+        <ol>
+          <li><a href="#b1">Set bounds on new meshes</a></li>
+          <li><a href="#b2">Flat and rotating meshes</a></li>
+          <li><a href="#b3">Long-reaching effects</a></li>
+          <li><a href="#b4">Check against the build</a></li>
+        </ol>
+      </li>
+      <li><a href="#color">Color drift</a>
+        <ol>
+          <li><a href="#c1">Properties before color</a></li>
+          <li><a href="#c2">Match Anchor, Root, bounds</a></li>
+          <li><a href="#c3">Rules for color values</a></li>
+          <li><a href="#c4">Limits of editor comparison</a></li>
+          <li><a href="#c5">Colors changed by build tools</a></li>
+          <li><a href="#c6">How to measure</a></li>
+        </ol>
+      </li>
+      <li><a href="#pitfalls">Other rules</a>
+        <ol>
+          <li><a href="#p-hard">Traps for experienced creators</a></li>
+          <li><a href="#p-layer">Object layers and Culling Mask</a></li>
+          <li><a href="#p-mesh">Meshes and performance</a></li>
+          <li><a href="#p-anim">Animator and sync</a></li>
+          <li><a href="#p-import">Import and pipeline</a></li>
+        </ol>
+      </li>
+      <li><a href="#workflow">Working principles</a></li>
+    </ol>
+  </nav>
+
+  <main id="main">
+    <h1>Unity Field Notes</h1>
+    <p class="lede">Rules I put together while making VRChat avatars in Unity. Each one says what goes wrong if you skip it, and what to do instead.</p>
+    <ul class="meta" aria-label="Environment">
+      <li>Unity 2022.3.22f1</li>
+      <li>VRChat SDK 3.10.x</li>
+      <li>lilToon 2.x</li>
+      <li>Modular Avatar</li>
+      <li>Avatar Optimizer (AAO)</li>
+      <li>NDMF</li>
+    </ul>
+
+    <section id="about" aria-labelledby="about-h">
+      <h2 id="about-h"><span class="num">0</span>How to read</h2>
+      <dl class="qa">
+        <dt>How do I read each entry?</dt>
+        <dd>The <span class="ask">question</span> at the top of a card tells you to read that entry if you have that symptom. The bold heading below it is the rule. <strong class="tag-bad">If you don't</strong> describes what actually happened when the rule was skipped, and <strong class="tag-do">Do this</strong> describes how to prevent it.</dd>
+        <dt>What do the badges mean?</dt>
+        <dd>Anything without a badge is something I ran into and measured myself. <span class="badge est">Inferred</span> marks a cause I could not confirm by reproducing it, and <span class="badge gen">General</span> marks a description of Unity's general behavior rather than something I ran into.</dd>
+        <dt>Does this hold for other versions?</dt>
+        <dd>Everything was checked in the environment above, so behavior may differ in other versions. For performance rank limits, the <a href="https://creators.vrchat.com/avatars/avatar-performance-ranking-system/">official table</a> is the authority.</dd>
+      </dl>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="layers" aria-labelledby="layers-h">
+      <h2 id="layers-h"><span class="num">1</span>Rendering layers (Render Queue)</h2>
+      <dl class="qa">
+        <dt>What does “layer” mean here?</dt>
+        <dd>The material's <code>Render Queue</code> number. It is not the object layer (0–31, <a href="#p-layer">chapter 4</a>) or an animator layer. This number is the drawing order, and lower numbers are drawn first.</dd>
+        <dt>Why does the order matter?</dt>
+        <dd>Whatever is drawn first leaves depth (ZWrite) and stencil behind, and whatever is drawn later looks at that record to decide whether to draw.</dd>
+      </dl>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-queue">
+        <table class="nowrap-2 stack queue">
+          <caption id="cap-queue">Render Queue ranges <span class="badge gen">General</span></caption>
+          <thead><tr><th class="num">Value</th><th>Name</th><th>What usually lives here</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1000</td><td>Background</td><td>Things drawn first, like the sky</td></tr>
+            <tr><td class="num">2000</td><td>Geometry</td><td>Opaque things: body, face, stock eyes painted on the face</td></tr>
+            <tr><td class="num">2450</td><td>AlphaTest</td><td>Cutout. On avatars, transparent hair that writes depth is sometimes placed around here</td></tr>
+            <tr class="hl"><td class="num">2500</td><td>Boundary</td><td>Up to 2500 is treated as opaque and drawn near to far; from 2501 it is treated as transparent and drawn far to near. Distance between transparents is measured from each renderer's bounds center</td></tr>
+            <tr><td class="num">3000</td><td>Transparent</td><td>Glass, water, effects, some eye shaders</td></tr>
+            <tr><td class="num">4000</td><td>Overlay</td><td>Things laid over everything</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-queue-t"><svg viewBox="0 66 640 170" role="img" aria-labelledby="fig-queue-t fig-queue-d">
+          <title id="fig-queue-t">Moving the eye shader's queue just before the bangs makes the eyes visible through the bangs</title>
+          <desc id="fig-queue-d">Before the fix, the order is face 2000, bangs 2450, eyes 3000, so the eyes are blocked by the depth the bangs left behind. After the fix, the order is face 2000, eyes 2449, bangs 2450, so the bangs cover the eyes as a see-through layer.</desc>
+          <text class="svg-text" x="40" y="86" font-size="13" font-weight="700">Before</text>
+          <rect x="40" y="94" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="119" font-size="13" text-anchor="middle">Face 2000</text>
+          <rect x="230" y="94" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="315" y="113" font-size="13" text-anchor="middle">Bangs 2450</text>
+          <text class="svg-muted" x="315" y="128" font-size="11" text-anchor="middle">transparent + writes depth</text>
+          <rect x="430" y="94" width="170" height="40" rx="6" fill="none" stroke="var(--warn)" stroke-width="2"/>
+          <text class="svg-warn" x="515" y="113" font-size="13" text-anchor="middle">Eyes 3000</text>
+          <text class="svg-warn" x="515" y="128" font-size="11" text-anchor="middle">blocked by bangs' depth</text>
+          <text class="svg-text" x="40" y="176" font-size="13" font-weight="700">After</text>
+          <rect x="40" y="184" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="209" font-size="13" text-anchor="middle">Face 2000</text>
+          <rect x="230" y="184" width="80" height="40" rx="6" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <text class="svg-accent" x="270" y="209" font-size="13" text-anchor="middle">Eyes 2449</text>
+          <rect x="320" y="184" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="405" y="203" font-size="13" text-anchor="middle">Bangs 2450</text>
+          <text class="svg-muted" x="405" y="218" font-size="11" text-anchor="middle">see-through over the eyes</text>
+        </svg></div>
+        <figcaption>Drawn left to right. All it takes is moving the eyes to the number just before the bangs.<span class="fig-hint"> On narrow screens, scroll the figure sideways.</span></figcaption>
+      </figure>
+      <div class="rule">
+        <span class="label">Principle</span>
+        <p>Set the queue by asking “whose depth and stencil does this need to see when it draws?” Give each number right next to the thing it must come before or after, and leave gaps where something else might need to slip in between.</p>
+      </div>
+
+      <article class="case" id="l1">
+        <p class="ask">Do the eyes vanish entirely behind transparent bangs?</p>
+        <h3>1-1. Draw anything that must show through a transparent surface before that surface</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>If the bangs are a transparent material that writes depth (2450) and the eye shader is at 3000, the bangs have already filled in depth by the time the eyes are drawn. The eyes that should show through the bangs drop out entirely. The stock eyes painted on the face were at 2000 and looked fine, so the problem only surfaced after the eyes were replaced.</dd>
+          <dt class="do">Do this</dt><dd>Move the eyes to the number just before the bangs (2449). Moving a queue also changes its order relative to whatever sat in between. Here, the blush and tear effects at 2460 ended up on top of the eyes, so I rechecked the surrounding effects as well.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l2">
+        <p class="ask">Did adding a depth mask cut off things it should not hide?</p>
+        <h3>1-2. Put a depth-only mask just before the thing it should hide</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>To keep water from showing inside a boat, I placed a depth-only mask (<code>ColorMask 0</code>, <code>ZWrite On</code>) at 2010. It wrote depth before the cutout avatars at 2450, so the feet of anyone standing in the boat looked cut off below the gunwale.</dd>
+          <dt class="do">Do this</dt><dd>
+            <p>I moved the mask to 2999 so it writes depth after all opaque and cutout geometry, right before the water (3000). Anything drawn after the mask is still hidden, though, so avatar parts that are transparent at 3000 or above can still be cut off inside the boat.</p>
+            <p>The same approach works when you only want to hide effects passing behind a panel: make the panel write depth and give the effect a later number than the panel. Cutting with a stencil instead also cuts the part that passes in front of the panel.</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l3">
+        <p class="ask">Where two transparent surfaces overlap, does the one behind show through in front?</p>
+        <h3>1-3. When transparent surfaces overlap, make the one that belongs in front write depth</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>Water was drawn later over a transparent panel that did not write depth, and the lower half of the panel showed through the water. From 2501 up, order is decided by distance to the bounds center, so it can flip depending on where you stand. <span class="badge gen">General</span></dd>
+          <dt class="do">Do this</dt><dd>Switch the panel that belongs in front to <code>ZWrite On</code> and discard fully transparent pixels with <code>clip</code>. Split the queues as well, for example light shafts at 2980, panel at 2990, UI at 3000.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l4">
+        <p class="ask">Does a stencil effect not show at all, or did the face shadow disappear after bringing in hair from another base body?</p>
+        <h3>1-4. Pin the writer and reader of a stencil in order with the queue, and check for ID collisions first</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>If the reader is drawn first, the stencil is still empty and nothing appears. If IDs collide, another shader can overwrite the value. <span class="badge est">Inferred</span> Base bodies use different face stencil IDs (for example 86 and 92), so hair taken from another base body needs its ID matched before the face's fake shadow appears.</dd>
+          <dt class="do">Do this</dt><dd>
+            <p>Fix the order by spacing the writer and reader one apart. For liquid inside a can, I used 2001 for the hole-shaped mask (stencil only), 2002 for the inner wall, and placed the transparent liquid after that.</p>
+            <p>Before using a new stencil, survey the IDs already on the avatar (eye see-through, fake shadows, base-body gimmicks) and avoid them. If several bits must be held for a long stretch, gather them just before Overlay (for example 3989–4000) to leave less room for other shaders to cut in, and clear before each use. <span class="badge est">Inferred</span></p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l5">
+        <p class="ask">Did swapping a shader break the drawing order you had set up?</p>
+        <h3>1-5. After swapping a shader or duplicating a material, check the queue again <span class="badge gen">General</span></h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>If the queue is set to <code>From Shader</code> (<code>m_CustomRenderQueue: -1</code> in the <code>.mat</code>), it changes the moment you swap the shader. An order you worked to set up can break from a single run of a shader conversion tool.</dd>
+          <dt class="do">Do this</dt><dd>Pin the queue to a number on any material whose order matters. After swapping or batch-converting shaders, read the queues back from the build output. Spreading materials out as 2451, 2452 and so on makes the order clearer and safer than stacking several on one number.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l6">
+        <p class="ask">Did making something visible through walls flatten its sense of depth?</p>
+        <h3>1-6. When showing something through walls, draw the hidden part differently</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>Drawing only with <code>ZTest Always</code> put the markers on top of everything at the same strength, and floor markers behind walls lost all sense of depth.</dd>
+          <dt class="do">Do this</dt><dd>
+            <p>Draw the same thing twice: the visible part with <code>ZTest LEqual</code>, the hidden part with <code>ZTest Greater</code> in a different color. I built an editor gizmo this way to check whether a wrist accessory is buried in a sleeve. It draws twice, in the accent color and in red, so if it looks red from every direction, it is buried in the sleeve. The same method (fade only the hidden part) can work for markers behind walls. <span class="badge est">Inferred</span></p>
+            <p>A mesh moved far away by a vertex shader needs its bounds enlarged by the same amount, which also enlarges the performance Bounds (<a href="#b3">2-3</a>).</p>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="bounds" aria-labelledby="bounds-h">
+      <h2 id="bounds-h"><span class="num">2</span>Bounds</h2>
+      <dl class="qa">
+        <dt>What are bounds?</dt>
+        <dd>A box, one per renderer. When this box is outside the camera's view, the whole mesh is not drawn. <span class="badge gen">General</span></dd>
+        <dt>Does the box grow when the mesh moves?</dt>
+        <dd>No. With <code>Update When Offscreen</code> off (the default), a SkinnedMeshRenderer's box is not recalculated from the vertices. A fixed-size box attached to the <code>Root Bone</code> simply follows that bone. <span class="badge gen">General</span></dd>
+        <dt>Is it used for anything besides culling?</dt>
+        <dd>Yes. Transparent drawing order (<a href="#layers">chapter 1</a>), where light probes are sampled, and light assignment (<a href="#c2">3-2</a>) are all based on this box. <span class="badge gen">General</span></dd>
+      </dl>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-merge-t"><svg viewBox="0 0 640 270" role="img" aria-labelledby="fig-merge-t fig-merge-d">
+          <title id="fig-merge-t">The box is fixed to Hips, so leaning forward pushes the head out of the box</title>
+          <desc id="fig-merge-d">Left: standing, the head sits inside a box fitted tightly around it. Right: leaning forward leaves the box where it was, so the head moves outside it. With a full-body box, the head stays inside even when leaning.</desc>
+          <rect class="svg-box" x="125" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <line class="svg-line" x1="153" y1="200" x2="153" y2="112" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="153" cy="80" r="20" fill="none" class="svg-line" stroke-width="3"/>
+          <path d="M136 72 q17 -22 36 0" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="153" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="165" y="205" font-size="13">Hips</text>
+          <text class="svg-text" x="153" y="250" font-size="15" text-anchor="middle">Standing</text>
+          <rect class="svg-box-ok" x="380" y="18" width="200" height="214" stroke-width="1.5" stroke-dasharray="2 4"/>
+          <text class="svg-accent" x="574" y="36" font-size="12" text-anchor="end">Full-body box</text>
+          <rect class="svg-box" x="425" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <text class="svg-muted" x="453" y="126" font-size="12" text-anchor="middle">Part-fitted box</text>
+          <line class="svg-line" x1="453" y1="200" x2="497" y2="124" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="513" cy="96" r="20" fill="none" stroke="var(--warn)" stroke-width="3"/>
+          <path d="M501 81 q22 -14 32 12" fill="none" stroke="var(--warn)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="453" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="465" y="205" font-size="13">Hips</text>
+          <text class="svg-warn" x="540" y="144" font-size="13">Outside box,</text>
+          <text class="svg-warn" x="540" y="161" font-size="13">not drawn</text>
+          <text class="svg-text" x="480" y="250" font-size="15" text-anchor="middle">Leaning forward</text>
+        </svg></div>
+        <figcaption>The spine bends, but the Root Bone (Hips) does not tilt. Parts far from the Root Bone, like the head and feet, leave the box first.<span class="fig-hint"> On narrow screens, scroll the figure sideways.</span></figcaption>
+      </figure>
+
+      <article class="case" id="b1">
+        <p class="ask">Do the bangs or shoes vanish at certain angles when you crouch or sit?</p>
+        <h3>2-1. When you create a new mesh, set its bounds yourself</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>A merged mesh, or one moved over from another base body, inherits its original small box. That box was fitted tightly to the part in a standing pose, so crouching or sitting pushes the bangs or shoes out of it, and depending on the viewing angle they disappear entirely. Leaving bounds at 0 in a merge tool makes it use the combined size of the original boxes, with the same result.</dd>
+          <dt class="do">Do this</dt><dd>Set the Root Bone to <code>Hips</code> and give it a box that covers the whole body, for example center 0 with extents <code>0.5 / 0.8 / 0.3</code> m, or a 2 m cube. It helps to give every renderer attached to the body (body, hair, clothes, accessories) the same box. Matching boxes also let AAO's automatic merging combine them more readily.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b2">
+        <p class="ask">How big should the box be for a flat mesh or one that spins around?</p>
+        <h3>2-2. Give flat or rotating meshes some slack in their box</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>A perfectly flat mesh gets a box with zero thickness. A mesh that rotates around a pivot (a billboard, for example) can have rotated vertices leave the box and get cut off. <span class="badge est">Inferred</span></dd>
+          <dt class="do">Do this</dt><dd>About 1 cm of thickness is a safe choice. For spinning meshes, widen the box ahead of time by the rotation radius (for example ±0.25 m).</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b3">
+        <p class="ask">Did a long effect blow your Bounds up to tens of meters?</p>
+        <h3>2-3. Manage the box of long-reaching effects separately</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>An effect reaching tens of meters, like a laser or scan, grew the whole avatar's Bounds from 1.0 × 1.65 × 0.6 m to 66.8 × 59.8 × 30 m, and the avatar became Very Poor (the two Lights added with it also contributed). Objects that are normally turned off still count in the stats.</dd>
+          <dt class="do">Do this</dt><dd>Keep everything attached to the body on a body-sized box, and give only the long effects the size they need. If the rank becomes a problem, add an option that turns the effect off. A small box makes things disappear and a big box lowers the rank, so it comes down to choosing which one you accept.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b4">
+        <p class="ask">How do you check before uploading that the box is big enough?</p>
+        <h3>2-4. Check bounds against the vertices in the build output</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>It does not show up on a still T-pose. You only find out after uploading, when someone tells you it “disappears at certain angles.”</dd>
+          <dt class="do">Do this</dt><dd>
+            <ol>
+              <li>Build a copy of the avatar with NDMF, because what actually gets uploaded is the mesh after merging.</li>
+              <li>For each renderer, bake the vertices in the current pose with <code>BakeMesh</code>, compare them with the box, and measure how many vertices fall outside and how far the farthest one is.</li>
+              <li>Repeat in crouching and sitting poses, and measure swinging accessories while moving them by hand.</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="color" aria-labelledby="color-h">
+      <h2 id="color-h"><span class="num">3</span>Color drift</h2>
+      <dl class="qa">
+        <dt>I matched <code>_Color</code>, so why does the color look different?</dt>
+        <dd><code>_Color</code> is not the final color but a multiplier applied to the texture. Lighting, outlines and build tools then act on top of that result. So before matching color values, match everything that is not a color value.</dd>
+      </dl>
+
+      <article class="case" id="c1">
+        <p class="ask">Do the bangs and back hair split into different colors despite the same <code>_Color</code>?</p>
+        <h3>3-1. When combining assets from different sources, compare properties before <code>_Color</code></h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>When I combined bangs and back hair from different creators, the colors split again whenever the angle or lighting changed, whether I used the same <code>_Color</code> or calculated each one separately.</dd>
+          <dt class="do">Do this</dt><dd>
+            <p>Compare every property of the two materials and remove the non-color differences first. These were the actual causes:</p>
+            <ul>
+              <li>Brightness cap (lilToon <code>_LightMaxLimit</code>). If only one side is lower, that side clips only under bright lighting.</li>
+              <li>Matcap. If it is on for only one side, a band of shine moves around with the viewpoint.</li>
+              <li>Outline width and outline texture. On meshes with many thin cards, thick outlines cover the faces and darken the whole thing.</li>
+            </ul>
+            <p>Next, desaturate the textures to zero, match their base brightness with lightness, and multiply both by the same <code>_Color</code>. The hue then comes from a single value, so at least the color value is no longer a reason for a split. Splits caused by lighting are covered in 3-2.</p>
+            <p>With clothing, a comparison once showed that only <code>_Cull</code> and the shader type differed. Comparing narrows down what to fix very quickly.</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c2">
+        <p class="ask">Do hair parts match in the editor but differ in brightness only in certain worlds?</p>
+        <h3>3-2. Give renderers that should look like one piece the same Probe Anchor, Root Bone and bounds</h3>
+        <figure>
+          <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-probe-t"><svg viewBox="0 0 640 250" role="img" aria-labelledby="fig-probe-t fig-probe-d">
+            <title id="fig-probe-t">Each renderer samples light probes at a different point</title>
+            <desc id="fig-probe-d">The bangs sample probes at the Chest, while the back hair, which has no Anchor, samples at the center of its own box, behind the Chest.</desc>
+            <g opacity=".5">
+              <circle cx="60" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="60" cy="180" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="180" r="5" style="fill:var(--steel)"/>
+            </g>
+            <text class="svg-muted" x="68" y="48" font-size="12">Light probes</text>
+            <circle cx="250" cy="80" r="34" fill="none" class="svg-line" stroke-width="3"/>
+            <path d="M226 62 q30 -30 56 4" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M222 70 q-28 40 -36 140" fill="none" stroke="var(--steel)" stroke-width="10" stroke-linecap="round"/>
+            <line class="svg-line" x1="250" y1="114" x2="250" y2="215" stroke-width="4" stroke-linecap="round"/>
+            <rect class="svg-box" x="170" y="56" width="58" height="160" stroke-width="2" stroke-dasharray="5 4"/>
+            <circle cx="250" cy="150" r="7" style="fill:var(--accent)"/>
+            <text class="svg-accent" x="262" y="154" font-size="13">Chest — where the bangs sample</text>
+            <path d="M193 130 l12 12 M205 130 l-12 12" stroke="var(--warn)" stroke-width="3"/>
+            <text class="svg-warn" x="150" y="238" font-size="13" text-anchor="middle">Back hair box center (no Anchor)</text>
+            <text class="svg-text" x="400" y="40" font-size="14">After the fix, all hair renderers:</text>
+            <text class="svg-text" x="400" y="60" font-size="14">Probe Anchor = Chest</text>
+            <text class="svg-text" x="400" y="80" font-size="14">Root Bone = Hips</text>
+            <text class="svg-text" x="400" y="100" font-size="14">bounds = same box</text>
+          </svg></div>
+          <figcaption>Side view. The face points right.<span class="fig-hint"> On narrow screens, scroll the figure sideways.</span></figcaption>
+        </figure>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>Identical in the editor, the bangs and back hair split in color and brightness only in worlds with baked light probes or point lights. My reading is that a renderer without an Anchor samples probes at its own box center, and that each renderer separately decides which point lights are Pixel and which are Vertex. <span class="badge est">Inferred</span> I could not reproduce the cause itself, but after matching them as below, the difference disappeared in game.</dd>
+          <dt class="do">Do this</dt><dd>Use Modular Avatar's <code>MA Mesh Settings</code> to give the body, hair and clothing renderers Probe Anchor = Chest, Bounds Root = Hips, and a box of the same size. Commercial prefabs all set these differently, so check every time you mix assets.</dd>
+        </dl>
+      </article>
+
+      <section id="c3" aria-labelledby="c3-h">
+        <p class="ask">Does a different color come out than the value you entered?</p>
+        <h3 id="c3-h">3-3. Enter color values by these rules</h3>
+        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-colorrules">
+          <table class="stack pair" style="--label-2: 'If you don\0027t'">
+            <caption id="cap-colorrules">Rules for color values</caption>
+            <thead><tr><th>Rule</th><th>If you don't</th></tr></thead>
+            <tbody>
+              <tr><td>Multiplying the <code>_Color</code> stored in a <code>.mat</code> by 255 gives the inspector's hex value. Do not apply sRGB/linear conversion when calculating values outside Unity</td><td>The wrong color goes in. Unity handles the conversion when it passes the value to the shader <span class="badge gen">General</span></td></tr>
+              <tr><td>Bake gradient maps pre-corrected with <code>linear_to_srgb()</code>, because the shader reads them as linear brightness</td><td>It reads a darker part of the ramp than intended and the color turns muddy</td></tr>
+              <tr><td>Set gradient maps to compression None and Wrap Clamp. Turn sRGB off on mask textures</td><td>The ramp gets banding, and a black fringe appears at the ends</td></tr>
+              <tr><td>To push saturation a lot, multiply <code>_Color</code> onto a white base texture and set the color from scratch</td><td>HSV rotation drags the original saturation along, so a dull color stays dull. A black texture stays 0 whatever you multiply it by</td></tr>
+              <tr><td>For HDR colors above 1, skip the picker's Intensity and enter the value directly with a script (<code>Material.SetColor</code>) or the Debug inspector</td><td>RGB gets renormalized and the values are crushed</td></tr>
+              <tr><td>Tune the value (V) of lilToon's color adjustment by rendering and measuring as you go</td><td>The output is nonlinear, so guesses miss. Lowering it by 7% changed the result by only about 3%</td></tr>
+              <tr><td>Do not use pure black (<code>#000000</code>)</td><td>It takes no light at all and looks like a hole</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <article class="case" id="c4">
+        <p class="ask">Does metal or gloss tuned in the editor look different in game?</p>
+        <h3>3-4. Compare what editor renders cannot judge in game, switching between options</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>Editor scenes used for checking have no reflection probes, and often no light probes or point lights either. Metal on the Standard shader renders pitch black and lighting differences do not show, so conclusions drawn in the editor do not match the game.</dd>
+          <dt class="do">Do this</dt><dd>Add a toggle that switches between the two materials from the menu (MA Menu Item plus Material Swap) and compare in game. When moving from Standard to a toon shader, do not carry over the albedo color as is: it is set bright because it tints reflections, so it stands out on its own. Turn off reflections and specular, and get the metallic look from a matcap.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c5">
+        <p class="ask">Does the color change on upload even though the inspector values are unchanged?</p>
+        <h3>3-5. Find colors changed by build tools by comparing build output</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>The inspector values are unchanged but the resulting color differs. For example, a brightness tool (Light Limit Changer, the v2 I was using at the time) animates per renderer, so an Unlit overlay on the same renderer changed along with it. lilToon materials with default color adjustment had their mask cleared at build time, and Standard materials, which the tool does not target, drifted in brightness on their own.</dd>
+          <dt class="do">Do this</dt><dd>
+            <ol>
+              <li>Build a copy with NDMF, compare materials before and after the build, and list every animation that touches <code>material.*</code>. Do not guess and switch features off one by one.</li>
+              <li>Turn off the problem feature on the tool's side. Bake effects that rely on masks into the texture.</li>
+              <li>Put materials that should brighten together on the same shader family.</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c6">
+        <p class="ask">How do you tell whether two colors really differ?</p>
+        <h3>3-6. Render colors under the same conditions and compare numbers</h3>
+        <dl>
+          <dt class="bad">If you don't</dt><dd>Comparing absolute values between screen captures taken separately mixes in lighting and angle differences. I misjudged twice this way. Screen captures also pick up UI, selection outlines and gizmos.</dd>
+          <dt class="do">Do this</dt><dd>Use a tool that renders the scene camera straight to PNG at a fixed resolution and anti-aliasing. Crop the region you are comparing and look at the median, excluding dark lines by keeping only the brightest 60%. Judge base texture candidates by their median RGB and saturation rather than by eye. Measuring the three bundled candidates once showed that all of them were too dark to use for multiplication.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="pitfalls" aria-labelledby="pitfalls-h">
+      <h2 id="pitfalls-h"><span class="num">4</span>Other rules</h2>
+
+      <h3 id="p-hard">Traps for experienced creators</h3>
+      <ul class="pitfalls">
+        <li><strong>When you duplicate an avatar, clear its Blueprint ID first and confirm it is gone from the file.</strong><p><span class="tag-bad">If you don't</span>A scene <code>Save As</code> carries the existing ID over and makes you upload over another avatar. A prefab Variant also inherits its parent's ID (another tool developer has actually overwritten an avatar this way). Build &amp; Test writes a new test ID into the scene. On top of that, the SDK clears the ID only in memory when a scene opens, so the button changes to Attach, but the ID is still in the file even after you save.</p><p><span class="tag-do">Do this</span>Save the scene override as an empty value, then check <code>blueprintId</code> in the file directly. Before uploading, verify that no two scenes or prefabs share an ID.</p></li>
+        <li><strong>Do not close the SDK window before the first upload.</strong><p><span class="tag-bad">If you don't</span>Before the first upload, the name, description and thumbnail are not saved to the scene, so they vanish the moment the window closes.</p></li>
+        <li><strong>Do not edit assets Unity has open by changing the files from outside.</strong><p><span class="tag-bad">If you don't</span>Unity writes back what it was holding and your edit is lost. Adding new files (place the <code>.meta</code> first, then Refresh) is fine.</p></li>
+        <li><strong>After editing a script, confirm compilation has finished before running the tool.</strong><p><span class="tag-bad">If you don't</span>The old code runs, and you trust a result that does not include your fix. Having tools write their run time and result to a log file makes this easy to check.</p></li>
+        <li><strong>Review the list of changed files before committing, and commit package swaps separately.</strong><p><span class="tag-bad">If you don't</span><code>ProjectSettings</code> rewritten by Unity while running Play or the SDK, and materials all re-saved after a package version change, get mixed into unrelated commits. Even after swapping a package, the old version keeps running until Refresh.</p></li>
+      </ul>
+
+      <h3 id="p-layer">Object layers (0–31) and Culling Mask</h3>
+      <dl class="qa">
+        <dt>Which layer is the body on in VRChat?</dt>
+        <dd>Your own body in first person is on <code>PlayerLocal(10)</code>, your body in a mirror on <code>MirrorReflection(18)</code>, and other people's bodies on <code>Player(9)</code>. <code>21(reserved4)</code> can be used as an empty layer. <span class="badge gen">General</span></dd>
+      </dl>
+      <ul class="pitfalls">
+        <li><strong>Remove 10 and 18 from the Culling Mask of lights attached to the body.</strong><p><span class="tag-bad">If you don't</span>Your own hands and body right in front of the light blow out white, both in first person and in mirrors.</p></li>
+        <li><strong>If you need a depth texture, add a Directional Light that lights nothing.</strong> Set its intensity to 0.001; at 0, Unity skips the light. Set shadows to Hard with strength 0, and turn on only the empty layer 21 in the Culling Mask. With Nothing, no depth is produced.<p><span class="tag-bad">If you don't</span>In worlds where all lighting is baked there is no <code>_CameraDepthTexture</code>, so effects meant to spread along floors and walls cannot follow the surfaces.</p><p>The trade-off is one more Light, which lowers the rank, and a brief hitch the first time it turns on in that world. <span class="badge est">Inferred</span></p></li>
+        <li><strong>Turn off 9, 10 and 18 in a particle system's Collides With</strong> (mask value <code>-263681</code>).<p><span class="tag-bad">If you don't</span>Particles bounce off people's bodies. Conversely, a BoxCollider on layer 18 collides with the wearer, who can stand on it.</p></li>
+      </ul>
+
+      <h3 id="p-mesh">Meshes and performance</h3>
+      <ul class="pitfalls">
+        <li><strong>Delete parts hidden by shape keys with AAO Remove Mesh By BlendShape.</strong><p><span class="tag-bad">If you don't</span>The invisible polygons stay. Optimization tools do not remove them for you.</p></li>
+        <li><strong>Delete unused objects instead of turning them off.</strong><p><span class="tag-bad">If you don't</span>Even when off, they still count toward Material Slots and Texture Memory.</p></li>
+        <li><strong>If you do not need outlines, switch to a shader without them.</strong><p><span class="tag-bad">If you don't</span><code>lilToonOutline</code> still draws with the outline turned off, adding a second draw call per slot.</p></li>
+        <li><strong>Check the Max Size of purchased textures in the <code>platformSettings</code> of the <code>.meta</code>.</strong><p><span class="tag-bad">If you don't</span>A texture can show 2048 but import at 4096 if the platform override is off, inflating Texture Memory.</p></li>
+        <li><strong>For an FBX with shape keys but no bones, create and attach a SkinnedMeshRenderer yourself.</strong><p><span class="tag-bad">If you don't</span>It comes in as a MeshRenderer, and its shape keys cannot be animated.</p></li>
+        <li><strong>Set <code>_Cull</code> to Off on loose clothing.</strong><p><span class="tag-bad">If you don't</span>The inner faces look like holes.</p></li>
+      </ul>
+
+      <h3 id="p-anim">Animator and sync</h3>
+      <ul class="pitfalls">
+        <li><strong>To move position per axis independently, split the transform per axis too.</strong><p><span class="tag-bad">If you don't</span>Animating only x of <code>m_LocalPosition</code> still makes the clip write y and z, setting them to 0.</p></li>
+        <li><strong>In a WD off blend tree, make every child motion write the same properties.</strong><p><span class="tag-bad">If you don't</span>A property written by only some children jumps to a wrong value when those children are not active.</p></li>
+        <li><strong>Give a Direct blend tree one 1D tree child per property, with weights summing to 1.</strong><p><span class="tag-bad">If you don't</span>A clip placed directly as a child adds its values to the other children. Once, unmuting it doubled the size of a watch.</p></li>
+        <li><strong>Apply full-body poses you toggle on and off in the Action layer, and remove parts that should keep tracking from its mask.</strong><p><span class="tag-bad">If you don't</span>The Base layer has no weight control, so the last pose stays. The Action layer sits on top of IK, so if the mask includes the arms, VR hands freeze.</p></li>
+        <li><strong>Build poses that others must see with animation.</strong> <span class="badge est">Inferred</span><p><span class="tag-bad">If you don't</span>If even one tracking point such as the head or hands is set to Tracking, your body is drawn with Networked IK on other people's screens. Bone rotations that run only on your side (Constraints and so on) are not visible to others.</p><p><span class="tag-do">Do this</span>Set Tracking Control to Animation for the parts others must see, and stop whole-body rotation with Locomotion Control.</p></li>
+        <li><strong>Do not use animator-driven parameters (AAP) as inputs.</strong><p><span class="tag-bad">If you don't</span>Even if you write a value into an AAP through sync or a driver, the animation overwrites it again every frame.</p></li>
+        <li><strong>Roll random outcomes only on the wearer's side and sync just the result.</strong><p><span class="tag-bad">If you don't</span>Random drivers and Contacts run separately for each person, so each viewer sees a different result.</p></li>
+        <li><strong>Design distance measurement with Contacts within 3 m.</strong><p><span class="tag-bad">If you don't</span>Even with a larger receiver radius, it is cut off at 3 m. The Proximity value falls in a straight line as the distance to the surface grows (1 − distance/radius).</p></li>
+        <li><strong>Use a VRC Constraint that follows only one axis only under a parent held level.</strong><p><span class="tag-bad">If you don't</span>The disabled axes are filled with values from the parent's frame, so under a moving bone they follow that bone's tilt.</p></li>
+        <li><strong>Set fingers to No Change in Tracking Control.</strong><p><span class="tag-bad">If you don't</span>Gestures stop working on Quest controllers and the fingers freeze straight.</p></li>
+      </ul>
+
+      <h3 id="p-import">Import and pipeline</h3>
+      <ul class="pitfalls">
+        <li><strong>On new assets, fix the settings that upload validation checks first.</strong> Read/Write and Blendshape Normals on FBX, Streaming Mip Maps on textures, Read/Write on AAO mask textures, Load In Background on audio.<p><span class="tag-bad">If you don't</span>Upload validation or the build stops. Copying an existing texture's <code>.meta</code> and changing only the guid carries the settings over.</p></li>
+        <li><strong>Include the mesh even when exporting only an animation from Blender.</strong><p><span class="tag-bad">If you don't</span>Without a bind pose, the default pose turns into the pose of the first frame.</p></li>
+        <li><strong>Import Blender FBX files with <code>Bake Axis Conversion</code> turned off.</strong><p><span class="tag-bad">If you don't</span>Y and Z get swapped in child object positions.</p></li>
+        <li><strong>Import only one unitypackage of the same asset.</strong><p><span class="tag-bad">If you don't</span>GUIDs collide and references get tangled. Extracting the packages before import and comparing GUIDs tells you in advance.</p></li>
+        <li><strong>Check MA and AAO results in Play or Build &amp; Test.</strong><p><span class="tag-bad">If you don't</span>Both act only at build time, so the editor view is not the result. Editor Play also has no VRChat runtime, so Parameter Drivers do not run.</p></li>
+        <li><strong>After trying out values, revert them and check the file.</strong><p><span class="tag-bad">If you don't</span>Entering Play with material values changed in the inspector makes NDMF write those values into the file.</p></li>
+        <li><strong>Review prefab Overrides item by item, and never press Apply All or Revert All.</strong><p><span class="tag-bad">If you don't</span>Applying a Removed item deletes it from the prefab asset. To restore it, Revert just that item.</p></li>
+      </ul>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="workflow" aria-labelledby="workflow-h">
+      <h2 id="workflow-h"><span class="num">5</span>Working principles</h2>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-workflow">
+        <table class="stack pair" style="--label-2: 'If you don\0027t'">
+          <caption id="cap-workflow">Working principles</caption>
+          <thead><tr><th>Principle</th><th>If you don't</th></tr></thead>
+          <tbody>
+            <tr><td>Make the final call after uploading and moving around in game. Check hands, viewpoint and secondary motion in VR</td><td>Problems that passed on a still screen come back with pose, angle and lighting</td></tr>
+            <tr><td>Before fixing anything, read the current value from the source file</td><td>You fix things from memory or old notes and put in wrong values. I once wrote the <code>_Color</code> conversion rule from memory and had to correct it from measurements</td></tr>
+            <tr><td>For each feature, decide up front in a table whether only the wearer sees it or others do too, along with the values to sync and their bit counts</td><td>You end up with gimmicks that look right only on the wearer's screen and different to everyone else. The editor cannot tell the two apart</td></tr>
+            <tr><td>Change one thing at a time, and leave a checkpoint before changing it</td><td>You cannot tell what helped and what broke things</td></tr>
+            <tr><td>Judge performance from the build output, starting with the red items</td><td>Builder numbers or guesses lead you to reduce the wrong things</td></tr>
+            <tr><td>Compare renders only between T-poses in the same Play session</td><td>PhysBones swing differently every time, burying the difference in noise</td></tr>
+            <tr><td>In check renders, actually turn off what should be hidden, or render a built copy. Do not fake it with <code>forceRenderingOff</code></td><td>NDMF's proxy preview meshes still draw, and Material Swaps you turned off still show in the Scene view, so the image differs from the build</td></tr>
+            <tr><td>Render several candidates and choose side by side</td><td>Judging from one alone, you miss a better option</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <p>Pyrite9 · Selected from my personal build notes: only what should be useful to others. If you find a mistake, please let me know in a GitHub Issue and I will fix it.</p>
+    <p>Last updated 2026-11-26 · <a href="https://creativecommons.org/licenses/by/4.0/deed.en">CC BY 4.0</a> · <a href="https://github.com/Pyrite9/vrchat-unity-notes">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>

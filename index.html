@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Unity 현장 노트 — VRChat 아바타 제작 방법론</title>
+<meta name="description" content="VRChat 아바타를 Unity로 만들 때 지키는 규칙. 렌더 큐, bounds, 색 편차, 숙련자도 빠지는 함정을 '안 하면 어떻게 되는지'와 '어떻게 하는지'로 정리했습니다.">
+<link rel="alternate" hreflang="ko" href="./">
+<link rel="alternate" hreflang="ja" href="./ja/">
+<link rel="alternate" hreflang="en" href="./en/">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="./">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M11 1 21 7v8l-10 6L1 15V7z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 1v20M1 7l10 6 10-6" fill="none" stroke="currentColor" stroke-width="1" opacity=".55"/></svg>
+      Unity 현장 노트
+    </a>
+    <nav aria-label="언어">
+      <ul class="lang-switch">
+        <li><a href="./" hreflang="ko" lang="ko" aria-current="page">한국어</a></li>
+        <li><a href="./ja/" hreflang="ja" lang="ja">日本語</a></li>
+        <li><a href="./en/" hreflang="en" lang="en">English</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-labelledby="toc-title">
+    <h2 id="toc-title">목차</h2>
+    <ol start="0">
+      <li><a href="#about">읽는 법</a></li>
+      <li><a href="#layers">렌더링 레이어 (Render Queue)</a>
+        <ol>
+          <li><a href="#l1">비쳐 보일 것은 먼저</a></li>
+          <li><a href="#l2">깊이 가림막 위치</a></li>
+          <li><a href="#l3">반투명끼리 겹칠 때</a></li>
+          <li><a href="#l4">스텐실 순서·번호</a></li>
+          <li><a href="#l5">셰이더 교체 후 큐</a></li>
+          <li><a href="#l6">벽 너머 보이기</a></li>
+        </ol>
+      </li>
+      <li><a href="#bounds">Bounds</a>
+        <ol>
+          <li><a href="#b1">새 메시는 bounds 직접 지정</a></li>
+          <li><a href="#b2">평면·회전 메시</a></li>
+          <li><a href="#b3">멀리 뻗는 효과</a></li>
+          <li><a href="#b4">빌드 결과로 점검</a></li>
+        </ol>
+      </li>
+      <li><a href="#color">색 편차</a>
+        <ol>
+          <li><a href="#c1">색보다 프로퍼티부터</a></li>
+          <li><a href="#c2">Anchor·Root·bounds 통일</a></li>
+          <li><a href="#c3">색 값 규칙</a></li>
+          <li><a href="#c4">에디터 비교의 한계</a></li>
+          <li><a href="#c5">빌드 도구가 바꾸는 색</a></li>
+          <li><a href="#c6">재는 방법</a></li>
+        </ol>
+      </li>
+      <li><a href="#pitfalls">그 밖의 규칙</a>
+        <ol>
+          <li><a href="#p-hard">숙련자도 빠지는 것</a></li>
+          <li><a href="#p-layer">오브젝트 레이어와 Culling Mask</a></li>
+          <li><a href="#p-mesh">메시·퍼포먼스</a></li>
+          <li><a href="#p-anim">애니메이터·동기화</a></li>
+          <li><a href="#p-import">임포트·파이프라인</a></li>
+        </ol>
+      </li>
+      <li><a href="#workflow">작업 원칙</a></li>
+    </ol>
+  </nav>
+
+  <main id="main">
+    <h1>Unity 현장 노트</h1>
+    <p class="lede">VRChat 아바타를 Unity로 만들면서 정리한 규칙입니다. 항목마다 지키지 않으면 무슨 일이 생기는지, 그리고 어떻게 하면 되는지를 적었습니다.</p>
+    <ul class="meta" aria-label="환경">
+      <li>Unity 2022.3.22f1</li>
+      <li>VRChat SDK 3.10.x</li>
+      <li>lilToon 2.x</li>
+      <li>Modular Avatar</li>
+      <li>Avatar Optimizer (AAO)</li>
+      <li>NDMF</li>
+    </ul>
+
+    <section id="about" aria-labelledby="about-h">
+      <h2 id="about-h"><span class="num">0</span>읽는 법</h2>
+      <dl class="qa">
+        <dt>항목은 어떻게 읽나요?</dt>
+        <dd>카드 맨 위의 <span class="ask">질문</span>은 이런 증상이 있을 때 이 항목을 보라는 표시입니다. 그 아래 굵은 제목이 규칙입니다. <strong class="tag-bad">안 하면</strong>에는 규칙을 지키지 않았을 때 실제로 겪은 일을, <strong class="tag-do">이렇게</strong>에는 그걸 막는 방법을 적었습니다.</dd>
+        <dt>배지는 무슨 뜻인가요?</dt>
+        <dd>따로 표시가 없는 내용은 직접 겪고 재서 확인한 것입니다. 원인을 재현으로 확인하지 못한 것에는 <span class="badge est">추정</span>, 겪은 일이 아니라 Unity의 일반적인 동작을 설명한 것에는 <span class="badge gen">일반</span>을 붙였습니다.</dd>
+        <dt>다른 버전에서도 맞나요?</dt>
+        <dd>모든 내용은 위 환경에서 확인했으니, 버전이 다르면 동작이 다를 수 있습니다. 퍼포먼스 등급 상한은 <a href="https://creators.vrchat.com/avatars/avatar-performance-ranking-system/">공식 표</a>에서 확인하는 게 정확합니다.</dd>
+      </dl>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="layers" aria-labelledby="layers-h">
+      <h2 id="layers-h"><span class="num">1</span>렌더링 레이어 (Render Queue)</h2>
+      <dl class="qa">
+        <dt>여기서 말하는 레이어는 무엇인가요?</dt>
+        <dd>머티리얼의 <code>Render Queue</code> 숫자입니다. 오브젝트 레이어(0~31, <a href="#p-layer">4장</a>)나 애니메이터 레이어와는 다릅니다. 이 숫자는 그리는 순서이고, 작은 것부터 그립니다.</dd>
+        <dt>순서가 왜 중요한가요?</dt>
+        <dd>먼저 그린 것이 깊이(ZWrite)와 스텐실을 남기고, 나중에 그리는 것은 그 기록을 보고 그릴지 말지를 정하기 때문입니다.</dd>
+      </dl>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-queue">
+        <table class="nowrap-2 stack queue">
+          <caption id="cap-queue">Render Queue 구간 <span class="badge gen">일반</span></caption>
+          <thead><tr><th class="num">숫자</th><th>이름</th><th>보통 여기 있는 것</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1000</td><td>Background</td><td>하늘처럼 맨 먼저 그릴 것</td></tr>
+            <tr><td class="num">2000</td><td>Geometry</td><td>불투명한 것. 몸, 얼굴, 얼굴에 그려진 순정 눈</td></tr>
+            <tr><td class="num">2450</td><td>AlphaTest</td><td>컷아웃. 아바타에서는 깊이를 기록하는 반투명 머리를 이 근처에 두기도 합니다</td></tr>
+            <tr class="hl"><td class="num">2500</td><td>경계</td><td>2500까지는 불투명으로 보고 가까운 것부터, 2501부터는 반투명으로 보고 먼 것부터 그립니다. 반투명끼리의 거리는 렌더러 bounds 중심으로 잽니다</td></tr>
+            <tr><td class="num">3000</td><td>Transparent</td><td>유리, 물, 이펙트, 일부 눈 셰이더</td></tr>
+            <tr><td class="num">4000</td><td>Overlay</td><td>모든 것 위에 얹는 것</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-queue-t"><svg viewBox="0 66 640 170" role="img" aria-labelledby="fig-queue-t fig-queue-d">
+          <title id="fig-queue-t">눈 셰이더 큐를 앞머리 직전으로 옮기면 앞머리 너머로 눈이 보입니다</title>
+          <desc id="fig-queue-d">고치기 전에는 얼굴 2000, 앞머리 2450, 눈 3000 순서로 그려서 눈이 앞머리가 남긴 깊이에 막힙니다. 고친 뒤에는 얼굴 2000, 눈 2449, 앞머리 2450 순서라 앞머리가 눈 위에 반투명으로 덮입니다.</desc>
+          <text class="svg-text" x="40" y="86" font-size="13" font-weight="700">고치기 전</text>
+          <rect x="40" y="94" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="119" font-size="13" text-anchor="middle">얼굴 2000</text>
+          <rect x="230" y="94" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="315" y="113" font-size="13" text-anchor="middle">앞머리 2450</text>
+          <text class="svg-muted" x="315" y="128" font-size="11" text-anchor="middle">반투명 + 깊이 기록</text>
+          <rect x="430" y="94" width="170" height="40" rx="6" fill="none" stroke="var(--warn)" stroke-width="2"/>
+          <text class="svg-warn" x="515" y="113" font-size="13" text-anchor="middle">눈 3000</text>
+          <text class="svg-warn" x="515" y="128" font-size="11" text-anchor="middle">앞머리 깊이에 막혀 사라짐</text>
+          <text class="svg-text" x="40" y="176" font-size="13" font-weight="700">고친 뒤</text>
+          <rect x="40" y="184" width="160" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="120" y="209" font-size="13" text-anchor="middle">얼굴 2000</text>
+          <rect x="230" y="184" width="80" height="40" rx="6" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          <text class="svg-accent" x="270" y="209" font-size="13" text-anchor="middle">눈 2449</text>
+          <rect x="320" y="184" width="170" height="40" rx="6" class="svg-soft" stroke="var(--line)"/>
+          <text class="svg-text" x="405" y="203" font-size="13" text-anchor="middle">앞머리 2450</text>
+          <text class="svg-muted" x="405" y="218" font-size="11" text-anchor="middle">눈 위에 반투명으로 덮임</text>
+        </svg></div>
+        <figcaption>왼쪽에서 오른쪽으로 그립니다. 눈을 앞머리 바로 앞 번호로 옮기기만 하면 됩니다.<span class="fig-hint"> 좁은 화면에서는 그림을 옆으로 밀어서 봅니다.</span></figcaption>
+      </figure>
+      <div class="rule">
+        <span class="label">원칙</span>
+        <p>큐는 "누가 누구의 깊이와 스텐실을 보고 그려야 하는가"로 정합니다. 번호는 바로 앞뒤에 오는 대상에 붙여서 주고, 사이에 다른 것이 끼어들 여지가 있으면 간격을 둡니다.</p>
+      </div>
+
+      <article class="case" id="l1">
+        <p class="ask">반투명 앞머리 너머로 눈이 통째로 사라지나요?</p>
+        <h3>1-1. 반투명 너머로 보여야 할 것은 그 반투명보다 먼저 그립니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>앞머리가 깊이를 기록하는 반투명(2450)이고 눈 셰이더가 3000이면, 눈을 그릴 차례에는 앞머리가 이미 깊이를 채워 둔 상태입니다. 그래서 앞머리 너머로 비쳐야 할 눈이 통째로 빠집니다. 얼굴에 그려진 순정 눈은 2000이라 괜찮았기 때문에, 눈을 바꾼 뒤에야 드러났습니다.</dd>
+          <dt class="do">이렇게</dt><dd>눈을 앞머리 바로 앞 번호(2449)로 옮깁니다. 큐를 옮기면 사이에 있던 것과의 순서도 바뀝니다. 여기서는 2460에 있던 홍조·눈물 효과가 눈 위에 얹히게 돼서 주변 효과까지 다시 확인했습니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l2">
+        <p class="ask">가림막을 넣었더니 가리면 안 되는 것까지 잘려 보이나요?</p>
+        <h3>1-2. 깊이만 쓰는 가림막은 가려야 할 것 바로 앞에 둡니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>배 안으로 물이 비치지 않게 깊이만 기록하는 가림막(<code>ColorMask 0</code>, <code>ZWrite On</code>)을 2010에 뒀더니, 2450인 컷아웃 아바타보다 먼저 깊이를 써 버렸습니다. 그 결과 배 안에 선 사람의 발이 뱃전 아래로 잘려 보였습니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <p>가림막을 2999로 옮겨 불투명과 컷아웃을 모두 그린 뒤, 물(3000) 바로 앞에서 깊이를 쓰게 했습니다. 다만 가림막보다 늦게 그려지는 것은 여전히 가려지므로, 3000 이상인 반투명 아바타 부위는 배 안에서 잘릴 수 있습니다.</p>
+            <p>판 뒤로 지나가는 효과만 숨기고 싶을 때도 같은 방법을 씁니다. 판이 깊이를 쓰게 하고 효과를 판보다 뒤 번호로 두면 됩니다. 스텐실로 자르면 판 앞을 지나는 부분까지 함께 잘립니다.</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l3">
+        <p class="ask">반투명끼리 겹친 곳에서 뒤에 있어야 할 것이 앞으로 비쳐 보이나요?</p>
+        <h3>1-3. 반투명끼리 겹친다면 앞에 와야 할 쪽이 깊이를 쓰게 합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>깊이를 쓰지 않는 반투명 패널 위에 물이 나중에 덮여 그려져서, 패널 아래쪽 절반이 물 너머로 비쳐 보였습니다. 2501 이상은 bounds 중심까지의 거리로 순서를 정하기 때문에 보는 위치에 따라 순서가 뒤집히기도 합니다. <span class="badge gen">일반</span></dd>
+          <dt class="do">이렇게</dt><dd>앞에 와야 하는 패널은 <code>ZWrite On</code>으로 바꾸고 완전히 투명한 부분은 <code>clip</code>으로 버립니다. 큐도 빛줄기 2980, 패널 2990, UI 3000처럼 따로 나눕니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l4">
+        <p class="ask">스텐실 효과가 나오지 않거나, 다른 소체의 머리를 가져온 뒤 얼굴 그림자가 사라졌나요?</p>
+        <h3>1-4. 스텐실은 쓰는 쪽과 읽는 쪽의 순서를 큐로 못 박고, 번호가 겹치는지 먼저 봅니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>읽는 쪽이 먼저 그려지면 스텐실이 아직 비어 있어 아무것도 나오지 않습니다. 번호가 겹치면 다른 셰이더가 값을 덮어쓸 수 있습니다. <span class="badge est">추정</span> 소체마다 얼굴 스텐실 번호가 달라서(예: 86과 92), 다른 소체의 머리를 가져오면 번호를 맞춰야 얼굴의 가짜 그림자가 나옵니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <p>쓰는 쪽과 읽는 쪽을 1씩 벌려 순서를 고정합니다. 캔 속 액체를 예로 들면, 구멍 모양 마스크(스텐실만 씀) 2001, 안쪽 벽 2002, 반투명 액체는 그 뒤로 뒀습니다.</p>
+            <p>새로 스텐실을 쓰기 전에 아바타에 이미 있는 번호(눈 비침, 가짜 그림자, 소체 기믹)를 조사해서 피합니다. 여러 비트를 오래 붙잡아야 한다면 Overlay 바로 앞(예: 3989~4000)으로 몰아 다른 셰이더가 끼어들 틈을 줄이고, 매번 지우고 시작합니다. <span class="badge est">추정</span></p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l5">
+        <p class="ask">셰이더를 바꾼 뒤 맞춰 둔 그리는 순서가 깨졌나요?</p>
+        <h3>1-5. 셰이더를 바꾸거나 머티리얼을 복제했다면 큐를 다시 확인합니다 <span class="badge gen">일반</span></h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>큐가 <code>From Shader</code>로 되어 있으면(<code>.mat</code>에서는 <code>m_CustomRenderQueue: -1</code>) 셰이더를 바꾸는 순간 큐도 따라 바뀝니다. 애써 맞춘 순서가 셰이더 교체 도구를 한 번 돌리는 것만으로 깨질 수 있습니다.</dd>
+          <dt class="do">이렇게</dt><dd>순서가 중요한 머티리얼은 큐를 숫자로 고정합니다. 셰이더를 바꾸거나 일괄 변환한 뒤에는 빌드 결과에서 큐를 다시 읽어 봅니다. 같은 번호에 여러 개를 몰아 두기보다 2451, 2452처럼 나눠서 순서를 분명히 하는 편이 안전합니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="l6">
+        <p class="ask">벽 너머로 보이게 했더니 깊이감이 사라졌나요?</p>
+        <h3>1-6. 벽 너머로 보이게 할 때는 가려진 부분을 다르게 그립니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd><code>ZTest Always</code>로만 그리면 표지가 모든 물체 위에 같은 진하기로 그려져서 벽 너머 바닥 표지의 깊이감이 사라졌습니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <p>같은 것을 두 번 그립니다. 보이는 부분은 <code>ZTest LEqual</code>로, 가려진 부분은 <code>ZTest Greater</code>로 다른 색을 줍니다. 손목 장신구가 소매에 묻혔는지 보는 에디터 기즈모를 이렇게 만들었습니다. 액센트 색과 빨강으로 두 번 그려서, 어느 방향에서 봐도 빨가면 소매 안에 묻힌 것입니다. 벽 너머 표지에도 같은 방법(가려진 부분만 옅게)을 쓸 수 있습니다. <span class="badge est">추정</span></p>
+            <p>정점 셰이더로 멀리 옮겨 그리는 메시는 bounds도 그만큼 키워야 하고, 그러면 퍼포먼스 Bounds도 커집니다(<a href="#b3">2-3</a>).</p>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="bounds" aria-labelledby="bounds-h">
+      <h2 id="bounds-h"><span class="num">2</span>Bounds</h2>
+      <dl class="qa">
+        <dt>Bounds는 무엇인가요?</dt>
+        <dd>렌더러마다 하나씩 있는 상자입니다. 이 상자가 카메라 시야 밖에 있으면 메시 전체를 그리지 않습니다. <span class="badge gen">일반</span></dd>
+        <dt>메시가 움직이면 상자도 따라 커지나요?</dt>
+        <dd>아닙니다. SkinnedMeshRenderer의 상자는 <code>Update When Offscreen</code>이 꺼져 있으면(기본값) 정점을 따라 다시 계산되지 않습니다. <code>Root Bone</code>에 붙은 고정 크기 상자가 그 뼈를 따라다닐 뿐입니다. <span class="badge gen">일반</span></dd>
+        <dt>컬링 말고도 쓰이나요?</dt>
+        <dd>네. 반투명의 그리는 순서(<a href="#layers">1장</a>), 라이트 프로브를 읽는 위치와 라이트 판정(<a href="#c2">3-2</a>)도 이 상자를 기준으로 합니다. <span class="badge gen">일반</span></dd>
+      </dl>
+      <figure>
+        <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-merge-t"><svg viewBox="0 0 640 270" role="img" aria-labelledby="fig-merge-t fig-merge-d">
+          <title id="fig-merge-t">상자는 Hips에 고정되어 있어 상체를 숙이면 머리가 상자 밖으로 나갑니다</title>
+          <desc id="fig-merge-d">왼쪽: 서 있을 때는 머리에 딱 맞는 상자 안에 머리가 있습니다. 오른쪽: 상체를 숙여도 상자는 그대로라 머리가 밖으로 나갑니다. 몸 전체 크기의 상자로 바꾸면 숙여도 안에 있습니다.</desc>
+          <rect class="svg-box" x="125" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <line class="svg-line" x1="153" y1="200" x2="153" y2="112" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="153" cy="80" r="20" fill="none" class="svg-line" stroke-width="3"/>
+          <path d="M136 72 q17 -22 36 0" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="153" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="165" y="205" font-size="13">Hips</text>
+          <text class="svg-text" x="153" y="250" font-size="15" text-anchor="middle">서 있을 때</text>
+          <rect class="svg-box-ok" x="380" y="18" width="200" height="214" stroke-width="1.5" stroke-dasharray="2 4"/>
+          <text class="svg-accent" x="574" y="36" font-size="12" text-anchor="end">몸 전체 상자</text>
+          <rect class="svg-box" x="425" y="44" width="56" height="66" stroke-width="2" stroke-dasharray="5 4"/>
+          <text class="svg-muted" x="453" y="126" font-size="12" text-anchor="middle">부위에 맞춘 상자</text>
+          <line class="svg-line" x1="453" y1="200" x2="497" y2="124" stroke-width="4" stroke-linecap="round"/>
+          <circle cx="513" cy="96" r="20" fill="none" stroke="var(--warn)" stroke-width="3"/>
+          <path d="M501 81 q22 -14 32 12" fill="none" stroke="var(--warn)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="453" cy="200" r="5" style="fill:var(--steel)"/>
+          <text class="svg-muted" x="465" y="205" font-size="13">Hips</text>
+          <text class="svg-warn" x="540" y="144" font-size="13">상자 밖이라</text>
+          <text class="svg-warn" x="540" y="161" font-size="13">안 그려짐</text>
+          <text class="svg-text" x="480" y="250" font-size="15" text-anchor="middle">상체를 숙였을 때</text>
+        </svg></div>
+        <figcaption>척추가 굽어도 Root Bone(Hips)은 기울지 않습니다. 그래서 머리나 발처럼 Root Bone에서 먼 부위가 먼저 상자를 벗어납니다.<span class="fig-hint"> 좁은 화면에서는 그림을 옆으로 밀어서 봅니다.</span></figcaption>
+      </figure>
+
+      <article class="case" id="b1">
+        <p class="ask">숙이거나 앉으면 앞머리나 신발이 특정 각도에서 사라지나요?</p>
+        <h3>2-1. 메시를 새로 만들었다면 bounds를 직접 지정합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>병합하거나 다른 소체에서 옮겨 온 메시는 원래의 작은 상자를 그대로 물려받습니다. 서 있는 자세에서 부위에 딱 맞춘 상자라서, 숙이거나 앉으면 앞머리나 신발이 상자 밖으로 나가고 보는 각도에 따라 통째로 사라집니다. 병합 도구에서 bounds를 0으로 비워 두면 원본 상자들을 합친 크기를 쓰기 때문에 결과는 마찬가지입니다.</dd>
+          <dt class="do">이렇게</dt><dd>Root Bone을 <code>Hips</code>로 두고 몸 전체를 덮는 상자를 넣습니다. 예를 들어 center 0, extents <code>0.5 / 0.8 / 0.3</code> m나 2 m 정육면체 정도면 됩니다. 몸에 붙는 렌더러(몸, 머리, 옷, 장신구)는 모두 같은 상자로 맞춰 두면 좋습니다. 상자가 같으면 AAO의 자동 병합도 더 잘 묶어 줍니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b2">
+        <p class="ask">평평하거나 빙글빙글 도는 메시의 상자는 얼마나 잡아야 하나요?</p>
+        <h3>2-2. 납작하거나 회전하는 메시는 상자에 여유를 줍니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>완전히 평평한 메시는 상자 두께가 0이 됩니다. 기준점을 중심으로 도는 메시(빌보드 등)는 돌아간 정점이 상자 밖으로 나가 잘릴 수 있습니다. <span class="badge est">추정</span></dd>
+          <dt class="do">이렇게</dt><dd>두께는 1 cm쯤 주는 게 안전합니다. 도는 메시는 미리 회전 반경만큼(예: ±0.25 m) 넓혀 둡니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b3">
+        <p class="ask">긴 효과를 넣은 뒤 Bounds 수치가 수십 m로 커졌나요?</p>
+        <h3>2-3. 멀리 뻗는 효과는 상자를 따로 관리합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>레이저나 스캔처럼 수십 m 뻗는 효과가 아바타 전체 Bounds를 1.0 × 1.65 × 0.6 m에서 66.8 × 59.8 × 30 m로 키웠고, 그 아바타는 Very Poor가 됐습니다(같이 넣은 Light 2개도 원인입니다). 평소에 꺼 둔 오브젝트도 통계에는 들어갑니다.</dd>
+          <dt class="do">이렇게</dt><dd>몸에 붙는 것은 몸 크기 상자로 통일하고, 긴 효과만 필요한 크기로 둡니다. 등급이 문제가 된다면 그 효과를 끌 수 있는 옵션을 마련합니다. 상자가 작으면 사라지고 크면 등급이 떨어지니, 둘 중 무엇을 감수할지 고르는 문제입니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="b4">
+        <p class="ask">상자가 충분히 큰지 업로드 전에 어떻게 확인하나요?</p>
+        <h3>2-4. bounds는 빌드 결과에서 정점과 비교해 점검합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>T포즈 정지 화면에서는 드러나지 않습니다. 업로드한 뒤 "특정 각도에서 사라진다"는 말을 듣고서야 알게 됩니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <ol>
+              <li>아바타 복제본을 NDMF로 빌드합니다. 실제로 올라가는 것은 병합이 끝난 메시이기 때문입니다.</li>
+              <li>렌더러마다 <code>BakeMesh</code>로 지금 자세의 정점을 구워 상자와 비교하고, 상자 밖으로 나간 정점 수와 가장 먼 거리를 잽니다.</li>
+              <li>숙인 자세, 앉은 자세로 반복하고, 흔들리는 장신구는 직접 돌려 가며 잽니다.</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="color" aria-labelledby="color-h">
+      <h2 id="color-h"><span class="num">3</span>색 편차</h2>
+      <dl class="qa">
+        <dt><code>_Color</code>를 맞췄는데 왜 색이 다르게 나오나요?</dt>
+        <dd><code>_Color</code>는 최종 색이 아니라 텍스처에 곱하는 배수입니다. 그 결과 위에 조명, 윤곽선, 빌드 도구가 또 손을 댑니다. 그래서 색 값을 맞추기 전에 색 값이 아닌 것부터 맞춰야 합니다.</dd>
+      </dl>
+
+      <article class="case" id="c1">
+        <p class="ask">같은 <code>_Color</code>를 넣었는데 앞머리와 뒷머리 색이 갈리나요?</p>
+        <h3>3-1. 서로 다른 에셋을 합칠 땐 <code>_Color</code>보다 프로퍼티 비교가 먼저입니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>제작자가 다른 앞머리와 뒷머리를 합쳤을 때, 같은 <code>_Color</code>를 넣어도, 따로 계산해서 맞춰도 각도나 조명이 바뀌면 다시 색이 갈렸습니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <p>두 머티리얼의 프로퍼티를 전부 비교해서 색 이외의 차이부터 없앱니다. 실제로 원인이었던 것들은 이렇습니다.</p>
+            <ul>
+              <li>밝기 상한(lilToon <code>_LightMaxLimit</code>). 한쪽만 낮으면 밝은 조명에서만 그쪽이 잘립니다.</li>
+              <li>매트캡. 한쪽만 켜져 있으면 시점에 따라 광택 띠가 돕니다.</li>
+              <li>윤곽선 폭과 윤곽선 텍스처. 얇은 판이 많은 메시는 굵은 윤곽선이 면을 덮어 전체가 어두워집니다.</li>
+            </ul>
+            <p>그다음 텍스처의 채도를 0으로 빼고 명도로 바탕 밝기를 맞춘 뒤, 양쪽에 같은 <code>_Color</code>를 곱합니다. 이렇게 하면 색조가 한 값에서만 나오니 적어도 색 값 때문에 갈리지는 않습니다. 조명 때문에 갈리는 경우는 3-2에서 다룹니다.</p>
+            <p>의상에서는 비교해 보니 <code>_Cull</code>과 셰이더 종류만 달랐던 적도 있습니다. 비교하면 고칠 곳이 금방 좁혀집니다.</p>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c2">
+        <p class="ask">에디터에서는 같은데 특정 월드에서만 머리 부위끼리 밝기가 다른가요?</p>
+        <h3>3-2. 한 덩어리로 보여야 하는 렌더러는 Probe Anchor, Root Bone, bounds를 같게 합니다</h3>
+        <figure>
+          <div class="fig-scroll" tabindex="0" role="region" aria-labelledby="fig-probe-t"><svg viewBox="0 0 640 250" role="img" aria-labelledby="fig-probe-t fig-probe-d">
+            <title id="fig-probe-t">라이트 프로브를 읽는 위치가 렌더러마다 다릅니다</title>
+            <desc id="fig-probe-d">앞머리는 Chest에서 프로브를 읽고, Anchor가 없는 뒷머리는 자기 상자 중심, 즉 Chest보다 뒤에서 읽습니다.</desc>
+            <g opacity=".5">
+              <circle cx="60" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="60" cy="180" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="60" r="5" style="fill:var(--steel)"/>
+              <circle cx="330" cy="180" r="5" style="fill:var(--steel)"/>
+            </g>
+            <text class="svg-muted" x="68" y="48" font-size="12">라이트 프로브</text>
+            <circle cx="250" cy="80" r="34" fill="none" class="svg-line" stroke-width="3"/>
+            <path d="M226 62 q30 -30 56 4" fill="none" stroke="var(--accent)" stroke-width="7" stroke-linecap="round"/>
+            <path d="M222 70 q-28 40 -36 140" fill="none" stroke="var(--steel)" stroke-width="10" stroke-linecap="round"/>
+            <line class="svg-line" x1="250" y1="114" x2="250" y2="215" stroke-width="4" stroke-linecap="round"/>
+            <rect class="svg-box" x="170" y="56" width="58" height="160" stroke-width="2" stroke-dasharray="5 4"/>
+            <circle cx="250" cy="150" r="7" style="fill:var(--accent)"/>
+            <text class="svg-accent" x="262" y="154" font-size="13">Chest — 앞머리가 읽는 곳</text>
+            <path d="M193 130 l12 12 M205 130 l-12 12" stroke="var(--warn)" stroke-width="3"/>
+            <text class="svg-warn" x="150" y="238" font-size="13" text-anchor="middle">뒷머리 상자 중심 (Anchor 없음)</text>
+            <text class="svg-text" x="400" y="40" font-size="14">맞춘 뒤 머리 렌더러 전부</text>
+            <text class="svg-text" x="400" y="60" font-size="14">Probe Anchor = Chest</text>
+            <text class="svg-text" x="400" y="80" font-size="14">Root Bone = Hips</text>
+            <text class="svg-text" x="400" y="100" font-size="14">bounds = 같은 상자</text>
+          </svg></div>
+          <figcaption>옆에서 본 모습입니다. 오른쪽이 얼굴 방향.<span class="fig-hint"> 좁은 화면에서는 그림을 옆으로 밀어서 봅니다.</span></figcaption>
+        </figure>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>에디터에서는 똑같은데, 구운 라이트 프로브나 점광원이 있는 월드에서만 앞머리와 뒷머리의 색과 밝기가 갈렸습니다. Anchor가 없는 렌더러는 자기 상자 중심에서 프로브를 읽고, 점광원을 Pixel과 Vertex로 나누는 판단도 렌더러마다 따로 하기 때문으로 봅니다. <span class="badge est">추정</span> 원인 자체를 재현하지는 못했지만, 아래처럼 맞춘 뒤 인게임에서 차이가 사라졌습니다.</dd>
+          <dt class="do">이렇게</dt><dd>Modular Avatar의 <code>MA Mesh Settings</code>로 몸, 머리, 옷 렌더러를 Probe Anchor는 Chest, Bounds Root는 Hips, 상자는 같은 크기로 통일합니다. 판매되는 prefab마다 이 값이 제각각이라 에셋을 섞을 때마다 확인해야 합니다.</dd>
+        </dl>
+      </article>
+
+      <section id="c3" aria-labelledby="c3-h">
+        <p class="ask">넣은 색 값과 다른 색이 나오나요?</p>
+        <h3 id="c3-h">3-3. 색 값은 이 규칙대로 넣습니다</h3>
+        <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-colorrules">
+          <table class="stack pair" style="--label-2: '안 하면'">
+            <caption id="cap-colorrules">색 값 규칙</caption>
+            <thead><tr><th>규칙</th><th>안 하면</th></tr></thead>
+            <tbody>
+              <tr><td><code>.mat</code>에 저장된 <code>_Color</code>에 255를 곱하면 인스펙터의 헥스 값이 됩니다. 밖에서 계산해 넣을 때 sRGB·linear 변환을 하지 않습니다</td><td>엉뚱한 색이 들어갑니다. 변환은 셰이더로 넘길 때 Unity가 알아서 합니다 <span class="badge gen">일반</span></td></tr>
+              <tr><td>그라디언트 맵은 <code>linear_to_srgb()</code>로 미리 보정해서 굽습니다. 셰이더가 linear 밝기로 읽기 때문입니다</td><td>의도보다 어두운 구간을 읽어 색이 탁해집니다</td></tr>
+              <tr><td>그라디언트 맵은 압축 None, Wrap Clamp로 둡니다. 마스크 텍스처는 sRGB를 끕니다</td><td>띠에 계단이 생기고 끝에 검은 테두리가 생깁니다</td></tr>
+              <tr><td>채도를 크게 올려야 하면 흰 바탕 텍스처에 <code>_Color</code>를 곱해 색을 새로 정합니다</td><td>HSV 회전은 원래 채도를 그대로 끌고 가서 탁한 색은 탁한 채로 남습니다. 검은 텍스처에는 무엇을 곱해도 0입니다</td></tr>
+              <tr><td>1을 넘는 HDR 색은 피커의 Intensity를 쓰지 말고, 스크립트(<code>Material.SetColor</code>)나 Debug 인스펙터로 값을 직접 넣습니다</td><td>RGB가 다시 정규화되면서 값이 뭉개집니다</td></tr>
+              <tr><td>lilToon 색조 보정의 명도(V)는 렌더해서 재 가며 맞춥니다</td><td>출력이 비선형이라 예상이 빗나갑니다. 7% 내려도 결과는 3% 정도만 바뀌었습니다</td></tr>
+              <tr><td>완전한 검정(<code>#000000</code>)은 쓰지 않습니다</td><td>빛을 전혀 받지 않아 구멍처럼 보입니다</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <article class="case" id="c4">
+        <p class="ask">에디터에서 맞춘 금속이나 광택이 인게임에서 다르게 보이나요?</p>
+        <h3>3-4. 에디터 렌더로 판단할 수 없는 것은 인게임에서 바꿔 가며 비교합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>확인용 에디터 씬에는 반사 프로브가 없고, 라이트 프로브와 점광원도 없는 경우가 많습니다. Standard 셰이더의 금속은 새까맣게 나오고 조명에 따른 차이는 보이지 않으니, 에디터에서 내린 결론이 인게임과 어긋납니다.</dd>
+          <dt class="do">이렇게</dt><dd>두 머티리얼을 메뉴로 바꿔 볼 수 있는 토글(MA Menu Item과 Material Swap)을 넣고 인게임에서 비교합니다. Standard를 툰 셰이더로 옮길 때는 알베도 색을 그대로 가져오지 않습니다. 반사 색조용이라 밝게 잡혀 있어서 혼자 떠 보입니다. 반사와 스페큘러는 끄고 금속 느낌은 매트캡으로 냅니다.</dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c5">
+        <p class="ask">인스펙터 값은 그대로인데 업로드하면 색이 바뀌나요?</p>
+        <h3>3-5. 빌드 도구가 바꾼 색은 빌드 결과를 비교해서 찾습니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>인스펙터 값은 그대로인데 결과 색이 다릅니다. 예를 들어 밝기 조절 도구(Light Limit Changer, 당시 쓰던 v2 기준)는 렌더러 단위로 애니메이션을 걸기 때문에, 같은 렌더러에 있던 Unlit 오버레이도 함께 바뀌었습니다. 색조 보정이 기본값인 lilToon 머티리얼은 빌드할 때 마스크가 비워졌고, Standard 머티리얼은 도구의 대상이 아니라서 혼자 밝기가 따로 놀았습니다.</dd>
+          <dt class="do">이렇게</dt><dd>
+            <ol>
+              <li>복제본을 NDMF로 빌드해서 빌드 전후의 머티리얼을 비교하고, <code>material.*</code>를 건드리는 애니메이션을 전부 뽑아 봅니다. 짐작으로 기능을 하나씩 꺼 보지 않습니다.</li>
+              <li>문제가 되는 기능은 도구 쪽에서 끕니다. 마스크에 기대는 효과는 텍스처에 구워 넣습니다.</li>
+              <li>같이 밝아져야 하는 머티리얼은 같은 셰이더 계열로 맞춥니다.</li>
+            </ol>
+          </dd>
+        </dl>
+      </article>
+
+      <article class="case" id="c6">
+        <p class="ask">두 색이 정말 다른지 어떻게 판단하나요?</p>
+        <h3>3-6. 색은 같은 조건으로 렌더해서 숫자로 비교합니다</h3>
+        <dl>
+          <dt class="bad">안 하면</dt><dd>따로 찍은 화면 캡처끼리 절대값을 비교하면 조명과 각도 차이가 섞여 들어갑니다. 이렇게 해서 두 번 잘못 판단했습니다. 화면 캡처에는 UI, 선택 외곽선, 기즈모도 섞입니다.</dd>
+          <dt class="do">이렇게</dt><dd>씬 카메라를 정해진 해상도와 안티에일리어싱으로 PNG에 바로 렌더하는 도구를 씁니다. 비교할 부위를 잘라 중앙값을 보고, 어두운 선은 밝기 상위 60%만 남겨 뺍니다. 바탕 텍스처 후보도 눈으로 고르지 말고 중앙값 RGB와 채도를 뽑아 판정합니다. 동봉된 후보 셋을 재 보니 모두 곱셈에 쓸 수 없을 만큼 어두웠던 적이 있습니다.</dd>
+        </dl>
+      </article>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="pitfalls" aria-labelledby="pitfalls-h">
+      <h2 id="pitfalls-h"><span class="num">4</span>그 밖의 규칙</h2>
+
+      <h3 id="p-hard">숙련자도 빠지는 것</h3>
+      <ul class="pitfalls">
+        <li><strong>아바타를 복제하면 Blueprint ID부터 비우고, 파일에 남지 않았는지 확인합니다.</strong><p><span class="tag-bad">안 하면</span>씬 <code>Save As</code>는 기존 ID를 그대로 물려받아 다른 아바타를 덮어 올리게 만듭니다. prefab Variant도 부모 ID를 물려받습니다(다른 도구 제작자가 실제로 덮어쓴 사례가 있습니다). Build &amp; Test는 씬에 테스트 ID를 새로 써 넣습니다. 게다가 SDK는 씬을 열 때 ID를 메모리에서만 비워서 버튼이 Attach로 바뀌는데, 저장해도 파일에는 ID가 남아 있습니다.</p><p><span class="tag-do">이렇게</span>씬 오버라이드를 빈 값으로 저장한 뒤 파일에서 <code>blueprintId</code>를 직접 확인합니다. 업로드 전에는 모든 씬과 prefab의 ID가 겹치지 않는지 검사합니다.</p></li>
+        <li><strong>첫 업로드 전에는 SDK 창을 닫지 않습니다.</strong><p><span class="tag-bad">안 하면</span>첫 업로드 전에는 이름, 설명, 썸네일이 씬에 저장되지 않아서 창을 닫는 순간 사라집니다.</p></li>
+        <li><strong>Unity가 열어 둔 에셋은 밖에서 파일로 고치지 않습니다.</strong><p><span class="tag-bad">안 하면</span>Unity가 갖고 있던 내용으로 다시 덮어써 수정이 사라집니다. 새 파일을 추가하는 것(<code>.meta</code>를 먼저 두고 Refresh)은 괜찮습니다.</p></li>
+        <li><strong>스크립트를 고쳤으면 컴파일이 끝난 걸 확인하고 도구를 실행합니다.</strong><p><span class="tag-bad">안 하면</span>옛 코드가 돌아서, 고친 게 반영되지 않은 결과를 믿게 됩니다. 도구가 실행 시각과 결과를 로그 파일에 남기게 해 두면 확인하기 쉽습니다.</p></li>
+        <li><strong>커밋 전에는 바뀐 파일 목록을 보고, 패키지 교체는 따로 커밋합니다.</strong><p><span class="tag-bad">안 하면</span>Play나 SDK를 돌리는 동안 Unity가 다시 쓴 <code>ProjectSettings</code>, 패키지 버전이 바뀌어 한꺼번에 다시 저장된 머티리얼이 다른 작업 커밋에 섞입니다. 패키지를 바꾼 뒤에도 Refresh 전까지는 옛 버전으로 돕니다.</p></li>
+      </ul>
+
+      <h3 id="p-layer">오브젝트 레이어(0~31)와 Culling Mask</h3>
+      <dl class="qa">
+        <dt>VRChat에서 몸은 어느 레이어에 있나요?</dt>
+        <dd>1인칭으로 보는 내 몸은 <code>PlayerLocal(10)</code>, 거울 속 내 몸은 <code>MirrorReflection(18)</code>, 남의 몸은 <code>Player(9)</code> 레이어에 있습니다. <code>21(reserved4)</code>은 비어 있는 레이어로 쓸 수 있습니다. <span class="badge gen">일반</span></dd>
+      </dl>
+      <ul class="pitfalls">
+        <li><strong>몸에 단 라이트는 Culling Mask에서 10과 18을 뺍니다.</strong><p><span class="tag-bad">안 하면</span>바로 앞에 있는 내 손과 몸이 하얗게 탑니다. 1인칭에서도, 거울에서도.</p></li>
+        <li><strong>깊이 텍스처가 필요하면 아무것도 비추지 않는 Directional Light를 넣습니다.</strong> 세기는 0.001로 둡니다. 0이면 Unity가 라이트를 건너뜁니다. 그림자는 Hard에 강도 0, Culling Mask는 빈 레이어 21 하나만 켭니다. Nothing으로 두면 깊이가 생기지 않습니다.<p><span class="tag-bad">안 하면</span>라이트를 전부 구운 월드에서는 <code>_CameraDepthTexture</code>가 없어서, 바닥이나 벽을 따라 퍼져야 할 효과가 표면을 타지 못합니다.</p><p>대신 Light가 하나 늘어 등급이 내려가고, 그 월드에서 처음 켤 때 잠깐 멈칫할 수 있습니다. <span class="badge est">추정</span></p></li>
+        <li><strong>파티클 Collides With에서 9, 10, 18을 끕니다</strong>(마스크 값 <code>-263681</code>).<p><span class="tag-bad">안 하면</span>사람 몸에 부딪혀 튑니다. 반대로 레이어 18에 둔 BoxCollider는 착용자와 부딪혀서 밟고 설 수 있습니다.</p></li>
+      </ul>
+
+      <h3 id="p-mesh">메시·퍼포먼스</h3>
+      <ul class="pitfalls">
+        <li><strong>셰이프키로 숨긴 부분은 AAO Remove Mesh By BlendShape로 지웁니다.</strong><p><span class="tag-bad">안 하면</span>보이지 않는 폴리곤이 그대로 남습니다. 최적화 도구도 지워 주지 않습니다.</p></li>
+        <li><strong>쓰지 않는 오브젝트는 꺼 두지 말고 지웁니다.</strong><p><span class="tag-bad">안 하면</span>꺼져 있어도 Material Slots와 Texture Memory에 그대로 잡힙니다.</p></li>
+        <li><strong>윤곽선이 필요 없으면 윤곽선 없는 셰이더로 바꿉니다.</strong><p><span class="tag-bad">안 하면</span><code>lilToonOutline</code>은 윤곽선을 꺼도 그리고, 슬롯마다 드로우콜이 두 번 생깁니다.</p></li>
+        <li><strong>판매 텍스처의 Max Size는 <code>.meta</code>의 <code>platformSettings</code>에서 확인합니다.</strong><p><span class="tag-bad">안 하면</span>2048로 보여도 플랫폼 설정이 꺼져 있으면 4096으로 들어가 Texture Memory가 불어납니다.</p></li>
+        <li><strong>뼈 없이 셰이프키만 있는 FBX에는 SkinnedMeshRenderer를 직접 만들어 붙입니다.</strong><p><span class="tag-bad">안 하면</span>MeshRenderer로 들어와서 셰이프키를 애니메이션할 수 없습니다.</p></li>
+        <li><strong>품이 큰 옷은 <code>_Cull</code>을 Off로 둡니다.</strong><p><span class="tag-bad">안 하면</span>안쪽 면이 뚫려 보입니다.</p></li>
+      </ul>
+
+      <h3 id="p-anim">애니메이터·동기화</h3>
+      <ul class="pitfalls">
+        <li><strong>위치를 축마다 따로 움직이려면 트랜스폼도 축마다 나눕니다.</strong><p><span class="tag-bad">안 하면</span><code>m_LocalPosition</code>의 x만 애니메이션해도 클립이 y와 z까지 써서 0으로 만듭니다.</p></li>
+        <li><strong>WD off 블렌드트리에서는 모든 자식 모션이 같은 속성을 쓰게 합니다.</strong><p><span class="tag-bad">안 하면</span>일부 자식만 쓰는 속성은 그 자식이 아닐 때 엉뚱한 값으로 튑니다.</p></li>
+        <li><strong>Direct 블렌드트리의 자식은 속성마다 1D 트리 하나로 두고, 가중치 합이 1이 되게 합니다.</strong><p><span class="tag-bad">안 하면</span>클립을 자식으로 바로 넣으면 다른 자식과 값이 더해집니다. 뮤트를 풀었더니 시계 크기가 두 배가 된 적이 있습니다.</p></li>
+        <li><strong>켜고 끄는 몸 전체 자세는 Action 레이어로 걸고, 트래킹을 살릴 부위는 마스크에서 뺍니다.</strong><p><span class="tag-bad">안 하면</span>Base 레이어는 세기를 조절할 수 없어 마지막 자세가 남습니다. Action 레이어는 IK 위에 덮이기 때문에 마스크에 팔이 들어 있으면 VR 손이 굳습니다.</p></li>
+        <li><strong>남에게 보여야 하는 자세는 애니메이션으로 만듭니다.</strong> <span class="badge est">추정</span><p><span class="tag-bad">안 하면</span>머리나 손 같은 트래킹 지점이 하나라도 Tracking이면 남의 화면에서 내 몸은 Networked IK로 그려집니다. 내 쪽에서만 도는 뼈 회전(Constraint 등)은 남에게 보이지 않습니다.</p><p><span class="tag-do">이렇게</span>보여야 하는 부위는 Tracking Control을 Animation으로 두고, 몸 전체 회전은 Locomotion Control로 막습니다.</p></li>
+        <li><strong>애니메이션이 쓰는 파라미터(AAP)는 입력으로 쓰지 않습니다.</strong><p><span class="tag-bad">안 하면</span>AAP에 동기화나 드라이버로 값을 넣어도, 애니메이션이 매 프레임 다시 덮어씁니다.</p></li>
+        <li><strong>확률 판정은 착용자 쪽에서만 굴리고 결과만 동기화합니다.</strong><p><span class="tag-bad">안 하면</span>Random 드라이버와 Contact는 사람마다 따로 돌아서 보는 사람마다 결과가 다릅니다.</p></li>
+        <li><strong>Contact로 거리를 잴 때는 3 m 안에서 설계합니다.</strong><p><span class="tag-bad">안 하면</span>수신 반경을 더 크게 줘도 3 m에서 잘립니다. Proximity 값은 표면까지 거리가 멀어질수록 일직선으로 줄어듭니다(1 − 거리/반경).</p></li>
+        <li><strong>VRC Constraint로 한 축만 따라가게 하는 건 수평으로 고정된 부모 밑에서만 씁니다.</strong><p><span class="tag-bad">안 하면</span>꺼 둔 축이 부모 기준 값으로 채워져서, 움직이는 뼈 밑에서는 그 뼈의 기울기를 따라갑니다.</p></li>
+        <li><strong>Tracking Control에서 손가락은 No Change로 둡니다.</strong><p><span class="tag-bad">안 하면</span>Quest 컨트롤러에서 제스처가 먹지 않고 손가락이 펴진 채 굳습니다.</p></li>
+      </ul>
+
+      <h3 id="p-import">임포트·파이프라인</h3>
+      <ul class="pitfalls">
+        <li><strong>새 에셋은 업로드 검증에 걸리는 설정부터 맞춥니다.</strong> FBX는 Read/Write와 Blendshape Normals, 텍스처는 Streaming Mip Maps, AAO 마스크 텍스처는 Read/Write, 오디오는 Load In Background.<p><span class="tag-bad">안 하면</span>업로드 검증이나 빌드에서 막힙니다. 기존 텍스처의 <code>.meta</code>를 복사해 guid만 바꾸면 설정이 그대로 따라옵니다.</p></li>
+        <li><strong>Blender에서 애니메이션만 내보낼 때도 메시를 함께 넣습니다.</strong><p><span class="tag-bad">안 하면</span>바인드 포즈가 없어서 기본 자세가 첫 프레임 자세로 바뀝니다.</p></li>
+        <li><strong>Blender FBX는 <code>Bake Axis Conversion</code>을 끄고 들여옵니다.</strong><p><span class="tag-bad">안 하면</span>자식 오브젝트 위치의 Y와 Z가 뒤섞입니다.</p></li>
+        <li><strong>같은 에셋의 unitypackage는 하나만 임포트합니다.</strong><p><span class="tag-bad">안 하면</span>GUID가 부딪혀 참조가 꼬입니다. 임포트 전에 패키지를 풀어 GUID를 대조해 보면 미리 알 수 있습니다.</p></li>
+        <li><strong>MA와 AAO의 결과는 Play나 Build &amp; Test로 확인합니다.</strong><p><span class="tag-bad">안 하면</span>둘 다 빌드할 때만 동작하니 에디터 화면은 결과가 아닙니다. 에디터 Play에는 VRChat 런타임도 없어서 Parameter Driver가 돌지 않습니다.</p></li>
+        <li><strong>값을 시험해 봤으면 되돌리고 파일을 확인합니다.</strong><p><span class="tag-bad">안 하면</span>인스펙터에서 머티리얼 값을 바꾼 채 Play에 들어가면 NDMF가 그 값을 파일에 써 버립니다.</p></li>
+        <li><strong>prefab Overrides는 항목별로 보고, Apply All이나 Revert All은 누르지 않습니다.</strong><p><span class="tag-bad">안 하면</span>Removed 항목을 Apply하면 prefab 에셋에서 지워집니다. 되살릴 때는 그 항목만 Revert합니다.</p></li>
+      </ul>
+    </section>
+
+    <!-- ===================================================== -->
+    <section id="workflow" aria-labelledby="workflow-h">
+      <h2 id="workflow-h"><span class="num">5</span>작업 원칙</h2>
+      <div class="table-wrapper" tabindex="0" role="region" aria-labelledby="cap-workflow">
+        <table class="stack pair" style="--label-2: '안 하면'">
+          <caption id="cap-workflow">작업 원칙</caption>
+          <thead><tr><th>원칙</th><th>안 하면</th></tr></thead>
+          <tbody>
+            <tr><td>최종 판단은 업로드한 뒤 인게임에서 움직여 보고 내립니다. 손, 시점, 흔들림은 VR로 봅니다</td><td>정지 화면에서 통과한 문제가 자세, 각도, 조명에 따라 다시 나옵니다</td></tr>
+            <tr><td>고치기 전에 지금 값을 원본 파일에서 읽습니다</td><td>기억이나 예전 메모대로 고쳐서 틀린 값을 넣습니다. <code>_Color</code> 변환 규칙을 기억대로 적었다가 실측으로 바로잡은 적이 있습니다</td></tr>
+            <tr><td>기능마다 착용자에게만 보이는지, 남에게도 보이는지를 표로 먼저 정합니다. 동기화할 값과 비트 수도 함께</td><td>착용자 화면에서만 맞고 남에게는 다르게 보이는 기믹이 나옵니다. 에디터에서는 둘을 구분할 수 없습니다</td></tr>
+            <tr><td>한 번에 하나만 바꾸고, 바꾸기 전에 체크포인트를 남깁니다</td><td>무엇이 효과를 냈고 무엇이 망가뜨렸는지 알 수 없습니다</td></tr>
+            <tr><td>퍼포먼스는 빌드 결과로 판단하고, 빨간 항목부터 봅니다</td><td>Builder 숫자나 짐작으로 엉뚱한 항목을 줄이게 됩니다</td></tr>
+            <tr><td>렌더 비교는 같은 Play 세션의 T포즈끼리만 합니다</td><td>PhysBone이 매번 다르게 흔들려 차이가 잡음에 묻힙니다</td></tr>
+            <tr><td>확인 렌더에서 숨길 것은 실제로 끄거나 빌드한 복제본을 찍습니다. <code>forceRenderingOff</code>로 흉내내지 않습니다</td><td>NDMF 미리보기용 대리 메시가 그대로 그려지고, 꺼 둔 Material Swap도 Scene 뷰에 반영돼 빌드와 다른 그림이 나옵니다</td></tr>
+            <tr><td>후보는 여러 개를 렌더해서 나란히 놓고 고릅니다</td><td>하나만 보고 판단해 더 나은 안을 놓칩니다</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <p>Pyrite9 · 개인 제작 기록 가운데 다른 사람에게도 쓸모 있는 것만 옮겼습니다. 틀린 곳이 있으면 GitHub Issue로 알려 주면 고치겠습니다.</p>
+    <p>마지막 수정 2026-11-26 · <a href="https://creativecommons.org/licenses/by/4.0/deed.ko">CC BY 4.0</a> · <a href="https://github.com/Pyrite9/vrchat-unity-notes">GitHub</a></p>
+  </div>
+</footer>
+</body>
+</html>
